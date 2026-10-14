@@ -54,6 +54,7 @@ $script:Themes = [ordered]@{
     "dark-blue"     = "Тёмная · синяя"
     "midnight"      = "Полночь (чёрная)"
     "glass"         = "Стекло"
+    "glass-dark"    = "Стекло · темнее"
     "glass-blue"    = "Стекло · синее"
     "glass-purple"  = "Стекло · фиолетовое"
     "glass-emerald" = "Стекло · изумруд"
@@ -67,12 +68,15 @@ function Get-Palette {
     # surfaces are tinted glass over that. DialogBg is opaque (dialogs have no backdrop); TermBg is the opaque
     # colour the embedded terminal paints so it blends with the page.
     if ($Name -like "glass*") {
-        $Tint = switch ($Name) { "glass-blue" { "#5C0F1830" } "glass-purple" { "#5C1A1230" } "glass-emerald" { "#5C0E201C" } default { "#5C14161C" } }
+        # glass-dark: denser tint (less desktop bleeding through), darker cards
+        $Tint = switch ($Name) { "glass-dark" { "#A60B0C10" } "glass-blue" { "#5C0F1830" } "glass-purple" { "#5C1A1230" } "glass-emerald" { "#5C0E201C" } default { "#5C14161C" } }
         $Acc  = switch ($Name) { "glass-purple" { "#FFA78BFA" } "glass-emerald" { "#FF34D399" } default { "#FF6E9BFF" } }
         $AccS = switch ($Name) { "glass-purple" { "#4DA78BFA" } "glass-emerald" { "#4D34D399" } default { "#4D5B8CFF" } }
-        $Term = switch ($Name) { "glass-blue" { "#FF151B2A" } "glass-purple" { "#FF1B1626" } "glass-emerald" { "#FF13201C" } default { "#FF1A1C22" } }
+        $Term = switch ($Name) { "glass-dark" { "#FF0E0F13" } "glass-blue" { "#FF151B2A" } "glass-purple" { "#FF1B1626" } "glass-emerald" { "#FF13201C" } default { "#FF1A1C22" } }
+        $Card = $(if ($Name -eq "glass-dark") { "#8C1A1C22" } else { "#5A262931" })
+        $CardH = $(if ($Name -eq "glass-dark") { "#A6222530" } else { "#7A2C3039" })
         return [ordered]@{
-            WindowBg = "#00000000"; Surface = $Tint; Card = "#5A262931"; CardHover = "#7A2C3039"
+            WindowBg = "#00000000"; Surface = $Tint; Card = $Card; CardHover = $CardH
             Selected = "#8027324A"; Line = "#2AFFFFFF"; Text = "#FFF2F4F8"; Sub = "#FFB4BCCA"; Faint = "#FF8A92A2"
             Accent = $Acc; AccentSoft = $AccS; Chip = "#5A30343E"; CodeBg = "#9916181D"
             Ok = "#FF4CC95E"; OkSoft = "#3A3FB950"; Fail = "#FFFF7B71"; FailSoft = "#3DF85149"
