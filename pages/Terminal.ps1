@@ -109,6 +109,58 @@ function Set-TermHint {
     $Ui.TermHintText.Foreground = Get-Brush $Color; $Ui.TermHintGlyph.Foreground = Get-Brush $Color
 }
 
+# ---------------------------------------------------------------- color presets
+# ConEmu ColorTableNN is a dword "00bbggrr". 0 = background, 7 = text, 1-6 = blue/green/cyan/red/magenta/yellow,
+# 8-15 = bright variants. Presets list only the slots they change; the rest stays as in the current file.
+$script:TermPalettes = [ordered]@{
+    "Тёмный (NetKnife)" = @{ 0 = "000c0c0c"; 7 = "00cccccc"; 8 = "00767676"; 15 = "00f2f2f2" }
+    "Чёрный"            = @{ 0 = "00000000"; 7 = "00c0c0c0"; 8 = "00808080"; 15 = "00ffffff" }
+    "Dracula"           = @{ 0 = "00362a28"; 1 = "00f993bd"; 2 = "007bfa50"; 3 = "00fde98b"; 4 = "005555ff"; 5 = "00c679ff"; 6 = "008cfaf1"; 7 = "00f2f8f8"; 8 = "00a47262"; 9 = "00f993bd"; 10 = "007bfa50"; 11 = "00fde98b"; 12 = "005555ff"; 13 = "00c679ff"; 14 = "008cfaf1"; 15 = "00ffffff" }
+    "Solarized Dark"    = @{ 0 = "00362b00"; 1 = "00d28b26"; 2 = "00009985"; 3 = "0098a12a"; 4 = "002f32dc"; 5 = "008236d3"; 6 = "000089b5"; 7 = "00969483"; 8 = "00756e58"; 9 = "00d28b26"; 10 = "00009985"; 11 = "0098a12a"; 12 = "002f32dc"; 13 = "008236d3"; 14 = "000089b5"; 15 = "00e3f6fd" }
+    "One Half Dark"     = @{ 0 = "00342c28"; 1 = "00efaf61"; 2 = "0079c398"; 3 = "00c2b656"; 4 = "00756ce0"; 5 = "00dd78c6"; 6 = "007bc0e5"; 7 = "00e4dfdc"; 8 = "0074635a"; 9 = "00efaf61"; 10 = "0079c398"; 11 = "00c2b656"; 12 = "00756ce0"; 13 = "00dd78c6"; 14 = "007bc0e5"; 15 = "00ffffff" }
+}
+
+function Set-TermPalette {
+    param([string]$Name)
+    $Pal = $script:TermPalettes[$Name]
+    if (-not $Pal) { return }
+    Initialize-ConEmuConfig
+    $Xml = Join-Path $script:ConEmuDir "ConEmu.xml"
+    if (-not (Test-Path $Xml)) { Show-Toast "ConEmu ещё не скачан" "warn"; return }
+    $T = [IO.File]::ReadAllText($Xml)
+    foreach ($I in $Pal.Keys) {
+        $K = "ColorTable{0:D2}" -f [int]$I
+        $Line = "<value name=`"$K`" type=`"dword`" data=`"$($Pal[$I])`"/>"
+        $Rx = "<value name=`"$K`" type=`"[^`"]*`" data=`"[^`"]*`"\s*/>"
+        if ($T -match $Rx) { $T = [regex]::Replace($T, $Rx, $Line, 1) }
+        else { $T = $T -replace '(?=\s*</key>\s*</key>\s*</key>\s*$)', "`r`n`t`t`t$Line" }
+    }
+    [IO.File]::WriteAllText($Xml, $T, [System.Text.UTF8Encoding]::new($false))
+    $script:Settings.TermPalette = $Name; Save-Settings
+    # the panel behind ConEmu shows through for a moment on restart — match it to the new background
+    $Bgr = [Convert]::ToInt32($Pal[0], 16)
+    if ($script:TermPanel) { $script:TermPanel.BackColor = [System.Drawing.Color]::FromArgb(($Bgr -band 0xFF), (($Bgr -shr 8) -band 0xFF), (($Bgr -shr 16) -band 0xFF)) }
+    if ($script:TermProc -and -not $script:TermProc.HasExited) {
+        $Cmd = $(if ($script:TermLabel -like "ssh *") { "ssh.exe $($script:TermLabel.Substring(4))" } elseif ($script:TermLabel -eq "cmd") { "cmd.exe" } else { "pwsh.exe -NoLogo" })
+        New-TermSession $Cmd $script:TermLabel
+    }
+    Show-Toast "Тема терминала: $Name"
+}
+
+function Show-TermThemeMenu {
+    param($Target)
+    $Cur = "$($script:Settings.TermPalette)"
+    $Items = foreach ($N in $script:TermPalettes.Keys) {
+        $I = New-MenuItem $N $(if ($N -eq $Cur) { 0xE73E } else { 0xE790 })
+        $I.Tag = $N
+        $I.Add_Click({ param($S, $E) Set-TermPalette $S.Tag })
+        $I
+    }
+    $Items += "-"
+    $Items += (New-MenuItem "Все настройки ConEmu…" 0xE713 { $Ui.TermSettings.RaiseEvent((New-Object System.Windows.RoutedEventArgs ([System.Windows.Controls.Button]::ClickEvent))) })
+    Show-Menu $Target $Items
+}
+
 # ---------------------------------------------------------------- session
 
 function Stop-TermSession {
@@ -181,6 +233,7 @@ function Initialize-TerminalPage {
     $Ui.TermSsh.Add_Click({ param($S, $E) Show-TermSshMenu $S })
     $Ui.TermExternal.Add_Click({ Start-Terminal "" "" })
     $Ui.TermGet.Add_Click({ Start-ConEmuDownload })
+    $Ui.TermTheme.Add_Click({ param($S, $E) Show-TermThemeMenu $S })
     # separate ConEmu instance with just the settings dialog; writes the same ConEmu.xml the embedded one loads
     $Ui.TermSettings.Add_Click({
         if (-not (Test-ConEmuReady)) { Show-Toast "ConEmu ещё не скачан" "warn"; return }

@@ -661,6 +661,9 @@
                                 <Button x:Name="TermExternal" Style="{StaticResource GhostBtn}" Padding="12,7" Margin="8,0,0,0" ToolTip="Открыть в отдельном окне Windows Terminal">
                                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8A7;" Style="{StaticResource Glyph}"/><TextBlock Text="В отдельном окне"/></StackPanel>
                                 </Button>
+                                <Button x:Name="TermTheme" Style="{StaticResource Btn}" Padding="12,7" Margin="8,0,0,0" ToolTip="Цвета фона и текста терминала">
+                                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE790;" Style="{StaticResource Glyph}"/><TextBlock Text="Тема"/><TextBlock Text="&#xE70D;" Style="{StaticResource Glyph}" FontSize="9" Margin="6,1,0,0"/></StackPanel>
+                                </Button>
                                 <Button x:Name="TermSettings" Style="{StaticResource Btn}" Padding="12,7" Margin="8,0,0,0" ToolTip="Настройки ConEmu: цвета, шрифт, горячие клавиши. Применятся после «Перезапустить»">
                                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE713;" Style="{StaticResource Glyph}"/><TextBlock Text="Настройки"/></StackPanel>
                                 </Button>
