@@ -1,0 +1,1110 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="NetKnife" Width="1340" Height="840" MinWidth="1020" MinHeight="620"
+        WindowStartupLocation="CenterScreen"
+        FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="13"
+        UseLayoutRounding="True" SnapsToDevicePixels="True">
+    <Window.Resources>
+        <!--THEME-->
+
+        <!-- ===== row templates ===== -->
+        <DataTemplate x:Key="BadgeT">
+            <Button x:Name="B" Style="{StaticResource ChipBtn}" Tag="{Binding Tag}" ToolTip="{Binding Tip}" Margin="0,0,5,0">
+                <TextBlock Text="{Binding Text}" FontSize="11.5" FontWeight="SemiBold"/>
+            </Button>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Kind}" Value="web">
+                    <Setter TargetName="B" Property="Background" Value="{StaticResource AccentSoft}"/>
+                    <Setter TargetName="B" Property="Foreground" Value="{StaticResource Accent}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="ssh">
+                    <Setter TargetName="B" Property="Background" Value="{StaticResource OkSoft}"/>
+                    <Setter TargetName="B" Property="Foreground" Value="{StaticResource Ok}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="warn">
+                    <Setter TargetName="B" Property="Background" Value="{StaticResource WarnSoft}"/>
+                    <Setter TargetName="B" Property="Foreground" Value="{StaticResource Warn}"/>
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <ItemsPanelTemplate x:Key="HPanel"><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+        <ItemsPanelTemplate x:Key="WPanel"><WrapPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+
+        <DataTemplate x:Key="HostRowT">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="48"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="150"/>
+                </Grid.ColumnDefinitions>
+                <Grid Width="36" Height="36" HorizontalAlignment="Left">
+                    <Border CornerRadius="10" Background="{Binding AvatarBg}"/>
+                    <TextBlock Text="{Binding Avatar}" FontFamily="{Binding AvatarFont}" Foreground="{Binding AvatarFg}" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <Ellipse x:Name="Dot" Width="11" Height="11" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-2,-2" Stroke="{StaticResource Surface}" StrokeThickness="2" Fill="{StaticResource Faint}" Visibility="Collapsed"/>
+                </Grid>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,10,0">
+                    <TextBlock Text="{Binding Alias}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Text="{Binding Address}" Style="{StaticResource SubText}" FontFamily="{StaticResource MonoFont}" FontSize="11.5" Margin="0,1,0,0"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <ItemsControl ItemsSource="{Binding Badges}" ItemTemplate="{StaticResource BadgeT}" ItemsPanel="{StaticResource HPanel}" VerticalAlignment="Center"/>
+                    <Border x:Name="JumpChip" Style="{StaticResource ChipBox}" Visibility="Collapsed" ToolTip="ProxyJump">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE71B;" Style="{StaticResource Glyph}" FontSize="10" Margin="0,0,5,0" Foreground="{StaticResource Sub}"/>
+                            <TextBlock Text="{Binding Jump}" FontSize="11.5" Foreground="{StaticResource Sub}"/>
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="KeyChip" Style="{StaticResource ChipBox}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock x:Name="KeyGlyph" Text="&#xE8D7;" Style="{StaticResource Glyph}" FontSize="10" Margin="0,0,5,0" Foreground="{StaticResource Sub}"/>
+                            <TextBlock x:Name="KeyText" Text="{Binding KeyName}" FontSize="11.5" Foreground="{StaticResource Sub}"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+                <StackPanel Grid.Column="3" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <TextBlock x:Name="St" Text="{Binding StatusText}" FontSize="12" VerticalAlignment="Center" Foreground="{StaticResource Faint}" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock x:Name="Star" Text="&#xE735;" FontFamily="{StaticResource IconFont}" FontSize="12" Margin="8,0,0,0" VerticalAlignment="Center" Foreground="{StaticResource Warn}" Visibility="Collapsed" ToolTip="Избранное"/>
+                </StackPanel>
+            </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Fav}" Value="True"><Setter TargetName="Star" Property="Visibility" Value="Visible"/></DataTrigger>
+                <DataTrigger Binding="{Binding HasJump}" Value="True"><Setter TargetName="JumpChip" Property="Visibility" Value="Visible"/></DataTrigger>
+                <DataTrigger Binding="{Binding KeyMissing}" Value="True">
+                    <Setter TargetName="KeyChip" Property="Background" Value="{StaticResource FailSoft}"/>
+                    <Setter TargetName="KeyText" Property="Foreground" Value="{StaticResource Fail}"/>
+                    <Setter TargetName="KeyGlyph" Property="Foreground" Value="{StaticResource Fail}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusKind}" Value="ok">
+                    <Setter TargetName="Dot" Property="Visibility" Value="Visible"/><Setter TargetName="Dot" Property="Fill" Value="{StaticResource Ok}"/>
+                    <Setter TargetName="St" Property="Foreground" Value="{StaticResource Ok}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusKind}" Value="fail">
+                    <Setter TargetName="Dot" Property="Visibility" Value="Visible"/><Setter TargetName="Dot" Property="Fill" Value="{StaticResource Fail}"/>
+                    <Setter TargetName="St" Property="Foreground" Value="{StaticResource Fail}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusKind}" Value="wait">
+                    <Setter TargetName="Dot" Property="Visibility" Value="Visible"/><Setter TargetName="Dot" Property="Fill" Value="{StaticResource Warn}"/>
+                    <Setter TargetName="St" Property="Foreground" Value="{StaticResource Warn}"/>
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <DataTemplate x:Key="KeyRowT">
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="48"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <Grid Width="36" Height="36" HorizontalAlignment="Left">
+                    <Border CornerRadius="10" Background="{Binding AvatarBg}"/>
+                    <TextBlock Text="&#xE8D7;" FontFamily="{StaticResource IconFont}" Foreground="{Binding AvatarFg}" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Grid>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,10,0">
+                    <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Text="{Binding Sub}" Style="{StaticResource SubText}" Margin="0,1,0,0"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border x:Name="Prob" Style="{StaticResource ChipBox}" Background="{StaticResource FailSoft}" Visibility="Collapsed">
+                        <TextBlock Text="{Binding Problem}" FontSize="11.5" Foreground="{StaticResource Fail}"/>
+                    </Border>
+                    <Border x:Name="Used" Style="{StaticResource ChipBox}">
+                        <TextBlock x:Name="UsedT" Text="{Binding UsedText}" FontSize="11.5" Foreground="{StaticResource Sub}"/>
+                    </Border>
+                    <Border Style="{StaticResource ChipBox}">
+                        <TextBlock Text="{Binding TypeText}" FontSize="11.5" Foreground="{StaticResource Sub}" FontFamily="{StaticResource MonoFont}"/>
+                    </Border>
+                </StackPanel>
+            </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding HasProblem}" Value="True"><Setter TargetName="Prob" Property="Visibility" Value="Visible"/></DataTrigger>
+                <DataTrigger Binding="{Binding Unused}" Value="True">
+                    <Setter TargetName="Used" Property="Background" Value="{StaticResource WarnSoft}"/>
+                    <Setter TargetName="UsedT" Property="Foreground" Value="{StaticResource Warn}"/>
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <DataTemplate x:Key="TunnelRowT">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="22"/><ColumnDefinition Width="230"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Ellipse x:Name="Dot" Width="9" Height="9" Fill="{StaticResource Faint}" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,10,0">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                        <Border x:Name="AutoChip" Style="{StaticResource ChipBox}" Visibility="Collapsed" ToolTip="Запускается при старте NetKnife"><TextBlock Text="авто" FontSize="11" Foreground="{StaticResource Sub}"/></Border>
+                    </StackPanel>
+                    <TextBlock Text="{Binding Host}" Style="{StaticResource SubText}" FontFamily="{StaticResource MonoFont}" FontSize="11.5" Margin="0,1,0,0"/>
+                </StackPanel>
+                <TextBlock Grid.Column="2" Text="{Binding Mapping}" FontFamily="{StaticResource MonoFont}" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                <TextBlock x:Name="St" Grid.Column="3" Text="{Binding StatusText}" FontSize="12" Foreground="{StaticResource Faint}" VerticalAlignment="Center" Margin="10,0,14,0" MaxWidth="320" TextTrimming="CharacterEllipsis" ToolTip="{Binding StatusText}"/>
+                <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="Toggle" Style="{StaticResource ChipBtn}" Tag="{Binding ToggleTag}" Margin="0,0,6,0" MinWidth="64"><TextBlock Text="{Binding ToggleText}" FontSize="12" FontWeight="SemiBold"/></Button>
+                    <Button x:Name="Open" Style="{StaticResource IconBtn}" Width="30" Height="30" Content="&#xE774;" Tag="{Binding OpenTag}" ToolTip="Открыть в браузере" Visibility="Collapsed"/>
+                    <Button Style="{StaticResource IconBtn}" Width="30" Height="30" Content="&#xE70F;" Tag="{Binding EditTag}" ToolTip="Изменить"/>
+                    <Button Style="{StaticResource IconBtn}" Width="30" Height="30" Content="&#xE74D;" Tag="{Binding DelTag}" ToolTip="Удалить" Foreground="{StaticResource Fail}"/>
+                </StackPanel>
+            </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Auto}" Value="True"><Setter TargetName="AutoChip" Property="Visibility" Value="Visible"/></DataTrigger>
+                <DataTrigger Binding="{Binding CanOpen}" Value="True"><Setter TargetName="Open" Property="Visibility" Value="Visible"/></DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="ok">
+                    <Setter TargetName="Dot" Property="Fill" Value="{StaticResource Ok}"/><Setter TargetName="St" Property="Foreground" Value="{StaticResource Ok}"/>
+                    <Setter TargetName="Toggle" Property="Background" Value="{StaticResource OkSoft}"/><Setter TargetName="Toggle" Property="Foreground" Value="{StaticResource Ok}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="fail">
+                    <Setter TargetName="Dot" Property="Fill" Value="{StaticResource Fail}"/><Setter TargetName="St" Property="Foreground" Value="{StaticResource Fail}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="wait">
+                    <Setter TargetName="Dot" Property="Fill" Value="{StaticResource Warn}"/><Setter TargetName="St" Property="Foreground" Value="{StaticResource Warn}"/>
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <DataTemplate x:Key="VpnRowT">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="22"/><ColumnDefinition Width="250"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Ellipse x:Name="Dot" Width="9" Height="9" Fill="{StaticResource Faint}" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,10,0">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                        <Border Style="{StaticResource ChipBox}"><TextBlock Text="{Binding TypeText}" FontSize="11" Foreground="{StaticResource Sub}"/></Border>
+                    </StackPanel>
+                    <TextBlock Text="{Binding Server}" Style="{StaticResource SubText}" FontFamily="{StaticResource MonoFont}" FontSize="11.5" Margin="0,1,0,0"/>
+                </StackPanel>
+                <TextBlock Grid.Column="2" Text="{Binding Extra}" FontFamily="{StaticResource MonoFont}" FontSize="12.5" Foreground="{StaticResource Sub}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                <TextBlock x:Name="St" Grid.Column="3" Text="{Binding StatusText}" FontSize="12" Foreground="{StaticResource Faint}" VerticalAlignment="Center" Margin="10,0,14,0" MaxWidth="320" TextTrimming="CharacterEllipsis" ToolTip="{Binding StatusText}"/>
+                <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="Toggle" Style="{StaticResource ChipBtn}" Tag="{Binding ToggleTag}" Margin="0,0,6,0" MinWidth="96"><TextBlock Text="{Binding ToggleText}" FontSize="12" FontWeight="SemiBold"/></Button>
+                    <Button Style="{StaticResource IconBtn}" Width="30" Height="30" Content="&#xE8C8;" Tag="{Binding CopyTag}" ToolTip="Копировать ссылку"/>
+                    <Button Style="{StaticResource IconBtn}" Width="30" Height="30" Content="&#xE70F;" Tag="{Binding EditTag}" ToolTip="Переименовать"/>
+                    <Button Style="{StaticResource IconBtn}" Width="30" Height="30" Content="&#xE74D;" Tag="{Binding DelTag}" ToolTip="Удалить" Foreground="{StaticResource Fail}"/>
+                </StackPanel>
+            </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Kind}" Value="ok">
+                    <Setter TargetName="Dot" Property="Fill" Value="{StaticResource Ok}"/><Setter TargetName="St" Property="Foreground" Value="{StaticResource Ok}"/>
+                    <Setter TargetName="Toggle" Property="Background" Value="{StaticResource OkSoft}"/><Setter TargetName="Toggle" Property="Foreground" Value="{StaticResource Ok}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="fail">
+                    <Setter TargetName="Dot" Property="Fill" Value="{StaticResource Fail}"/><Setter TargetName="St" Property="Foreground" Value="{StaticResource Fail}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="wait">
+                    <Setter TargetName="Dot" Property="Fill" Value="{StaticResource Warn}"/><Setter TargetName="St" Property="Foreground" Value="{StaticResource Warn}"/>
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <DataTemplate x:Key="WifiRowT">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="54"/><ColumnDefinition Width="*"/><ColumnDefinition Width="150"/><ColumnDefinition Width="230"/><ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock x:Name="Sig" Text="{Binding SignalText}" FontFamily="{StaticResource DisplayFont}" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource Ok}"/>
+                    <Grid Width="40" Height="4" Margin="0,2,0,0" HorizontalAlignment="Left">
+                        <Border Background="{StaticResource Chip}" CornerRadius="2"/>
+                        <Border x:Name="Bar" Background="{StaticResource Ok}" CornerRadius="2" HorizontalAlignment="Left" Width="{Binding BarWidth}"/>
+                    </Grid>
+                </StackPanel>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,10,0">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding Ssid}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                        <Border x:Name="Mine" Style="{StaticResource ChipBox}" Background="{StaticResource OkSoft}" Visibility="Collapsed"><TextBlock Text="подключено" FontSize="11" Foreground="{StaticResource Ok}"/></Border>
+                        <Border x:Name="Open" Style="{StaticResource ChipBox}" Background="{StaticResource WarnSoft}" Visibility="Collapsed"><TextBlock Text="открытая" FontSize="11" Foreground="{StaticResource Warn}"/></Border>
+                    </StackPanel>
+                    <TextBlock Text="{Binding Auth}" Style="{StaticResource SubText}" FontSize="11.5" Margin="0,1,0,0"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding BandCh}" FontFamily="{StaticResource MonoFont}" FontSize="12.5"/>
+                    <TextBlock Text="{Binding Radio}" Style="{StaticResource SubText}" FontSize="11" Foreground="{StaticResource Faint}" Margin="0,1,0,0"/>
+                </StackPanel>
+                <StackPanel Grid.Column="3" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Bssid}" FontFamily="{StaticResource MonoFont}" FontSize="12" Foreground="{StaticResource Sub}"/>
+                    <TextBlock Text="{Binding Vendor}" Style="{StaticResource SubText}" FontSize="11" Foreground="{StaticResource Faint}" Margin="0,1,0,0"/>
+                </StackPanel>
+                <Button Grid.Column="4" Style="{StaticResource IconBtn}" Width="30" Height="30" Content="&#xE8C8;" Tag="{Binding CopyTag}" ToolTip="Копировать BSSID" VerticalAlignment="Center"/>
+            </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Level}" Value="mid"><Setter TargetName="Sig" Property="Foreground" Value="{StaticResource Warn}"/><Setter TargetName="Bar" Property="Background" Value="{StaticResource Warn}"/></DataTrigger>
+                <DataTrigger Binding="{Binding Level}" Value="low"><Setter TargetName="Sig" Property="Foreground" Value="{StaticResource Fail}"/><Setter TargetName="Bar" Property="Background" Value="{StaticResource Fail}"/></DataTrigger>
+                <DataTrigger Binding="{Binding IsMine}" Value="True"><Setter TargetName="Mine" Property="Visibility" Value="Visible"/></DataTrigger>
+                <DataTrigger Binding="{Binding IsOpen}" Value="True"><Setter TargetName="Open" Property="Visibility" Value="Visible"/></DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <DataTemplate x:Key="MonRowT">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="22"/><ColumnDefinition Width="230"/><ColumnDefinition Width="136"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Ellipse x:Name="Dot" Width="10" Height="10" Fill="{StaticResource Faint}" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,10,0">
+                    <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Text="{Binding Target}" Style="{StaticResource SubText}" FontFamily="{StaticResource MonoFont}" FontSize="11.5" Margin="0,1,0,0"/>
+                </StackPanel>
+                <Grid Grid.Column="2" Width="120" Height="26" VerticalAlignment="Center" Margin="0,0,16,0">
+                    <Path Data="{Binding LossPath}" Stroke="{StaticResource Fail}" StrokeThickness="2" Opacity="0.55"/>
+                    <Path Data="{Binding Spark}" Stroke="{StaticResource Accent}" StrokeThickness="1.6" StrokeLineJoin="Round"/>
+                </Grid>
+                <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock x:Name="St" Text="{Binding StatusText}" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource Faint}" MinWidth="110"/>
+                    <TextBlock Text="{Binding Stats}" FontSize="12" Foreground="{StaticResource Sub}" Margin="12,0,0,0" VerticalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Since}" FontSize="11.5" Foreground="{StaticResource Faint}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <Button Style="{StaticResource IconBtn}" Width="30" Height="30" Content="&#xE74D;" Tag="{Binding DelTag}" ToolTip="Убрать из монитора" Foreground="{StaticResource Fail}"/>
+                </StackPanel>
+            </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Kind}" Value="ok"><Setter TargetName="Dot" Property="Fill" Value="{StaticResource Ok}"/><Setter TargetName="St" Property="Foreground" Value="{StaticResource Ok}"/></DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="fail"><Setter TargetName="Dot" Property="Fill" Value="{StaticResource Fail}"/><Setter TargetName="St" Property="Foreground" Value="{StaticResource Fail}"/></DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="wait"><Setter TargetName="Dot" Property="Fill" Value="{StaticResource Warn}"/><Setter TargetName="St" Property="Foreground" Value="{StaticResource Warn}"/></DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <DataTemplate x:Key="ScanRowT">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="22"/><ColumnDefinition Width="210"/><ColumnDefinition Width="230"/><ColumnDefinition Width="70"/><ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Ellipse x:Name="Dot" Width="9" Height="9" Fill="{StaticResource Ok}" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Ip}" FontFamily="{StaticResource MonoFont}" FontSize="13.5" FontWeight="SemiBold"/>
+                    <TextBlock Text="{Binding Name}" Style="{StaticResource SubText}" Margin="0,1,0,0"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Mac}" FontFamily="{StaticResource MonoFont}" FontSize="12" Foreground="{StaticResource Sub}"/>
+                    <TextBlock Text="{Binding Vendor}" Style="{StaticResource SubText}" FontSize="11.5" Foreground="{StaticResource Faint}" Margin="0,1,0,0"/>
+                </StackPanel>
+                <TextBlock x:Name="Rtt" Grid.Column="3" Text="{Binding RttText}" VerticalAlignment="Center" FontSize="12" Foreground="{StaticResource Sub}"/>
+                <ItemsControl Grid.Column="4" ItemsSource="{Binding Badges}" ItemTemplate="{StaticResource BadgeT}" ItemsPanel="{StaticResource WPanel}" VerticalAlignment="Center" Margin="0,5,0,0"/>
+            </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Pingable}" Value="False"><Setter TargetName="Dot" Property="Fill" Value="{StaticResource Warn}"/></DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <DataTemplate x:Key="PortRowT">
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="86"/><ColumnDefinition Width="150"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding Port}" FontFamily="{StaticResource MonoFont}" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="{StaticResource Accent}"/>
+                <TextBlock Grid.Column="1" Text="{Binding Service}" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                <TextBlock Grid.Column="2" Text="{Binding Info}" Style="{StaticResource SubText}" FontFamily="{StaticResource MonoFont}" VerticalAlignment="Center" ToolTip="{Binding Info}"/>
+                <ItemsControl Grid.Column="3" ItemsSource="{Binding Badges}" ItemTemplate="{StaticResource BadgeT}" ItemsPanel="{StaticResource HPanel}" VerticalAlignment="Center"/>
+            </Grid>
+        </DataTemplate>
+
+        <DataTemplate x:Key="LineRowT">
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Ellipse x:Name="Dot" Width="7" Height="7" Fill="{StaticResource Ok}" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                <TextBlock Grid.Column="1" Text="{Binding Text}" FontFamily="{StaticResource MonoFont}" FontSize="12" TextTrimming="CharacterEllipsis"/>
+            </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Kind}" Value="fail"><Setter TargetName="Dot" Property="Fill" Value="{StaticResource Fail}"/></DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="warn"><Setter TargetName="Dot" Property="Fill" Value="{StaticResource Warn}"/></DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="info"><Setter TargetName="Dot" Property="Fill" Value="{StaticResource Faint}"/></DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <DataTemplate x:Key="DnsRowT">
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="4"/><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Border x:Name="Bar" CornerRadius="2" Background="{StaticResource Ok}"/>
+                <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Server}" FontWeight="SemiBold"/>
+                    <TextBlock Text="{Binding Meta}" Style="{StaticResource SubText}" Margin="0,1,0,0"/>
+                </StackPanel>
+                <TextBlock Grid.Column="2" Text="{Binding Answer}" FontFamily="{StaticResource MonoFont}" FontSize="12.5" TextWrapping="Wrap" VerticalAlignment="Center"/>
+            </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Kind}" Value="fail"><Setter TargetName="Bar" Property="Background" Value="{StaticResource Fail}"/></DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="warn"><Setter TargetName="Bar" Property="Background" Value="{StaticResource Warn}"/></DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="wait"><Setter TargetName="Bar" Property="Background" Value="{StaticResource Faint}"/></DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Grid x:Name="Root">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="228"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- ================= sidebar ================= -->
+        <DockPanel Margin="12,6,10,12">
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="6,4,0,18">
+                <Image x:Name="LogoImg" Width="34" Height="34" RenderOptions.BitmapScalingMode="HighQuality"/>
+                <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="NetKnife" FontFamily="{StaticResource DisplayFont}" FontSize="17" FontWeight="SemiBold"/>
+                    <TextBlock Text="SSH · сеть · диагностика" FontSize="11" Foreground="{StaticResource Faint}"/>
+                </StackPanel>
+            </StackPanel>
+
+            <StackPanel DockPanel.Dock="Bottom">
+                <Button x:Name="NewServerBtn" Style="{StaticResource AccentBtn}" HorizontalContentAlignment="Left" Padding="14,9">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE710;" Style="{StaticResource Glyph}"/><TextBlock Text="Новый сервер"/></StackPanel>
+                </Button>
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0" HorizontalAlignment="Center">
+                    <Button x:Name="ConfigBtn" Style="{StaticResource IconBtn}" Content="&#xE70F;" ToolTip="Открыть ~/.ssh/config"/>
+                    <Button x:Name="SshDirBtn" Style="{StaticResource IconBtn}" Content="&#xE838;" ToolTip="Папка .ssh"/>
+                    <Button x:Name="ConsoleBtn" Style="{StaticResource IconBtn}" Content="&#xE756;" ToolTip="Классическое меню ssh-key.ps1"/>
+                    <Button x:Name="TerminalBtn" Style="{StaticResource IconBtn}" Content="&#xE8A7;" ToolTip="Новый терминал"/>
+                    <Button x:Name="ThemeBtn" Style="{StaticResource IconBtn}" Content="&#xE793;" ToolTip="Тема: системная / тёмная / светлая"/>
+                </StackPanel>
+            </StackPanel>
+
+            <StackPanel>
+                <TextBlock Text="СЕТЬ" Style="{StaticResource Caption}" Margin="12,0,0,4"/>
+                <RadioButton x:Name="NavScan" Style="{StaticResource Nav}">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE968;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Сканер сети"/></StackPanel>
+                </RadioButton>
+                <RadioButton x:Name="NavPorts" Style="{StaticResource Nav}">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE839;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Порты"/></StackPanel>
+                </RadioButton>
+                <RadioButton x:Name="NavPing" Style="{StaticResource Nav}">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9D9;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Пинг и трассировка"/></StackPanel>
+                </RadioButton>
+                <RadioButton x:Name="NavDns" Style="{StaticResource Nav}">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE774;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="DNS"/></StackPanel>
+                </RadioButton>
+                <RadioButton x:Name="NavWifi" Style="{StaticResource Nav}">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE701;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Wi-Fi"/></StackPanel>
+                </RadioButton>
+                <RadioButton x:Name="NavMonitor" Style="{StaticResource Nav}">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9D2;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Монитор"/></StackPanel>
+                </RadioButton>
+                <RadioButton x:Name="NavVpn" Style="{StaticResource Nav}">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xEA18;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="VPN"/></StackPanel>
+                </RadioButton>
+                <TextBlock Text="SSH" Style="{StaticResource Caption}" Margin="12,16,0,4"/>
+                <RadioButton x:Name="NavHosts" Style="{StaticResource Nav}" IsChecked="True">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE977;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Хосты"/></StackPanel>
+                </RadioButton>
+                <RadioButton x:Name="NavKeys" Style="{StaticResource Nav}">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8D7;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Ключи"/></StackPanel>
+                </RadioButton>
+                <RadioButton x:Name="NavTunnels" Style="{StaticResource Nav}">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8AB;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Туннели"/></StackPanel>
+                </RadioButton>
+                <RadioButton x:Name="NavTerminal" Style="{StaticResource Nav}">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE756;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Терминал"/></StackPanel>
+                </RadioButton>
+                <TextBlock Text="СИСТЕМА" Style="{StaticResource Caption}" Margin="12,16,0,4"/>
+                <RadioButton x:Name="NavSettings" Style="{StaticResource Nav}">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE713;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Настройки"/></StackPanel>
+                </RadioButton>
+            </StackPanel>
+        </DockPanel>
+
+        <!-- ================= content ================= -->
+        <Border Grid.Column="1" x:Name="ContentPanel" Background="{StaticResource Surface}" BorderBrush="{StaticResource Line}" BorderThickness="1,1,0,0" CornerRadius="12,0,0,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <!-- status strip -->
+                <DockPanel Margin="20,12,16,0" LastChildFill="False">
+                    <TextBox x:Name="QuickPing" DockPanel.Dock="Left" Style="{StaticResource Search}" Width="236" Height="34" Tag="Быстрый пинг: адрес и Enter"/>
+                    <Border x:Name="CpuPill" DockPanel.Dock="Left" Style="{StaticResource Pill}" Margin="8,0,0,0" ToolTip="Загрузка процессора">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock x:Name="CpuGlyph" Text="&#xE950;" Style="{StaticResource Glyph}" FontSize="12" Margin="0,0,6,0" Foreground="{StaticResource Sub}"/>
+                            <TextBlock x:Name="CpuText" FontSize="12" Text="CPU —" FontFamily="{StaticResource MonoFont}" MinWidth="50"/>
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="RamPill" DockPanel.Dock="Left" Style="{StaticResource Pill}" ToolTip="Занятая оперативная память">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock x:Name="RamGlyph" Text="&#xEEA0;" Style="{StaticResource Glyph}" FontSize="12" Margin="0,0,6,0" Foreground="{StaticResource Sub}"/>
+                            <TextBlock x:Name="RamText" FontSize="12" Text="RAM —" FontFamily="{StaticResource MonoFont}" MinWidth="54"/>
+                        </StackPanel>
+                    </Border>
+                    <Button x:Name="NetRefreshBtn" DockPanel.Dock="Right" Style="{StaticResource IconBtn}" Content="&#xE72C;" ToolTip="Обновить сетевой статус" Margin="4,0,0,0"/>
+                    <Border x:Name="WifiPill" DockPanel.Dock="Right" Style="{StaticResource Pill}" Visibility="Collapsed" Cursor="Hand">
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE701;" Style="{StaticResource Glyph}" FontSize="12" Margin="0,0,6,0" Foreground="{StaticResource Sub}"/><TextBlock x:Name="WifiText" FontSize="12"/></StackPanel>
+                    </Border>
+                    <Border x:Name="VpnPill" DockPanel.Dock="Right" Style="{StaticResource Pill}" Visibility="Collapsed">
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72E;" Style="{StaticResource Glyph}" FontSize="12" Margin="0,0,6,0" Foreground="{StaticResource Warn}"/><TextBlock x:Name="VpnText" FontSize="12"/></StackPanel>
+                    </Border>
+                    <Border x:Name="LanPill" DockPanel.Dock="Right" Style="{StaticResource Pill}">
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE839;" Style="{StaticResource Glyph}" FontSize="12" Margin="0,0,6,0" Foreground="{StaticResource Sub}"/><TextBlock x:Name="LanText" FontSize="12" Text="…"/></StackPanel>
+                    </Border>
+                    <Border x:Name="DnsPill" DockPanel.Dock="Right" Style="{StaticResource Pill}">
+                        <StackPanel Orientation="Horizontal"><Ellipse x:Name="DnsDot" Width="8" Height="8" Fill="{StaticResource Faint}" Margin="0,0,7,0" VerticalAlignment="Center"/><TextBlock x:Name="DnsText" FontSize="12" Text="DNS …" TextTrimming="None" MinWidth="78"/></StackPanel>
+                    </Border>
+                    <Border x:Name="IpPill" DockPanel.Dock="Right" Style="{StaticResource Pill}" Cursor="Hand">
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE774;" Style="{StaticResource Glyph}" FontSize="12" Margin="0,0,6,0" Foreground="{StaticResource Accent}"/><TextBlock x:Name="IpText" FontSize="12" Text="внешний IP …" FontFamily="{StaticResource MonoFont}"/></StackPanel>
+                    </Border>
+                </DockPanel>
+
+                <!-- page header -->
+                <Grid Grid.Row="1" Margin="26,16,16,10">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock x:Name="PageTitle" Text="Хосты" FontFamily="{StaticResource DisplayFont}" FontSize="26" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="PageSub" Text="" Foreground="{StaticResource Sub}" Margin="1,2,0,0"/>
+                    </StackPanel>
+                    <StackPanel x:Name="HostsTools" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBox x:Name="HostSearch" Style="{StaticResource Search}" Width="260" Tag="Поиск  (Ctrl+F)"/>
+                        <Button x:Name="WebProbeBtn" Style="{StaticResource Btn}" Margin="8,0,0,0" ToolTip="Проверить HTTP/HTTPS на всех хостах">
+                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE774;" Style="{StaticResource Glyph}"/><TextBlock Text="Web"/></StackPanel>
+                        </Button>
+                        <Button x:Name="TestAllBtn" Style="{StaticResource Btn}" Margin="8,0,0,0" ToolTip="ssh BatchMode ко всем хостам">
+                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE73E;" Style="{StaticResource Glyph}"/><TextBlock Text="Проверить все"/></StackPanel>
+                        </Button>
+                        <Button x:Name="RefreshBtn" Style="{StaticResource IconBtn}" Content="&#xE72C;" ToolTip="Перечитать config и ключи (F5)" Margin="4,0,0,0"/>
+                    </StackPanel>
+                    <StackPanel x:Name="KeysTools" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
+                        <TextBox x:Name="KeySearch" Style="{StaticResource Search}" Width="260" Tag="Поиск  (Ctrl+F)"/>
+                    </StackPanel>
+                </Grid>
+
+                <!-- ================= pages ================= -->
+                <Grid Grid.Row="2">
+
+                    <!-- HOSTS -->
+                    <Grid x:Name="PageHosts">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="410"/></Grid.ColumnDefinitions>
+                        <ListView x:Name="HostList" Style="{StaticResource List}" ItemTemplate="{StaticResource HostRowT}" Padding="14,0,8,12" SelectionMode="Extended"/>
+                        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="4,0,18,16">
+                            <StackPanel x:Name="HostDetails">
+                                <Border Style="{StaticResource CardBox}" Padding="16">
+                                    <StackPanel>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                            <Grid Width="48" Height="48">
+                                                <Border x:Name="HdAvatarBg" CornerRadius="13"/>
+                                                <TextBlock x:Name="HdAvatar" FontSize="19" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Grid>
+                                            <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center">
+                                                <TextBlock x:Name="HdAlias" FontFamily="{StaticResource DisplayFont}" FontSize="20" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock x:Name="HdAddress" Style="{StaticResource SubText}" FontFamily="{StaticResource MonoFont}"/>
+                                            </StackPanel>
+                                        </Grid>
+                                        <WrapPanel Margin="0,12,0,0">
+                                            <Border x:Name="HdStatusPill" Style="{StaticResource Pill}" Margin="0,0,6,0"><TextBlock x:Name="HdStatus" FontSize="12"/></Border>
+                                            <ItemsControl x:Name="HdBadges" ItemTemplate="{StaticResource BadgeT}" ItemsPanel="{StaticResource HPanel}" VerticalAlignment="Center"/>
+                                        </WrapPanel>
+                                        <Button x:Name="HdConnect" Style="{StaticResource AccentBtn}" Margin="0,14,0,0" Padding="12,9">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE756;" Style="{StaticResource Glyph}"/><TextBlock Text="Подключиться"/><TextBlock Text="  Enter" Opacity="0.6" FontSize="11.5" VerticalAlignment="Center"/></StackPanel>
+                                        </Button>
+                                        <UniformGrid Columns="2" Margin="0,8,0,0">
+                                            <Button x:Name="HdTest" Style="{StaticResource Btn}" Margin="0,0,4,8" HorizontalContentAlignment="Left">
+                                                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE73E;" Style="{StaticResource Glyph}"/><TextBlock Text="Проверить SSH"/></StackPanel>
+                                            </Button>
+                                            <Button x:Name="HdPorts" Style="{StaticResource Btn}" Margin="4,0,0,8" HorizontalContentAlignment="Left">
+                                                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE839;" Style="{StaticResource Glyph}"/><TextBlock Text="Сканировать порты"/></StackPanel>
+                                            </Button>
+                                            <Button x:Name="HdCopyKey" Style="{StaticResource Btn}" Margin="0,0,4,8" HorizontalContentAlignment="Left">
+                                                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8C8;" Style="{StaticResource Glyph}"/><TextBlock Text="Копировать ключ"/></StackPanel>
+                                            </Button>
+                                            <Button x:Name="HdPing" Style="{StaticResource Btn}" Margin="4,0,0,8" HorizontalContentAlignment="Left">
+                                                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9D9;" Style="{StaticResource Glyph}"/><TextBlock Text="Пинг"/></StackPanel>
+                                            </Button>
+                                            <Button x:Name="HdInstall" Style="{StaticResource Btn}" Margin="0,0,4,8" HorizontalContentAlignment="Left" ToolTip="Команда для вставки в shell сервера">
+                                                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE943;" Style="{StaticResource Glyph}"/><TextBlock Text="Команда установки"/></StackPanel>
+                                            </Button>
+                                            <Button x:Name="HdPassword" Style="{StaticResource Btn}" Margin="4,0,0,8" HorizontalContentAlignment="Left" ToolTip="Поставить ключ на сервер, войдя по паролю">
+                                                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72E;" Style="{StaticResource Glyph}"/><TextBlock Text="Ключ по паролю"/></StackPanel>
+                                            </Button>
+                                            <Button x:Name="HdSnippets" Style="{StaticResource Btn}" Margin="0,0,4,8" HorizontalContentAlignment="Left" ToolTip="Запустить сохранённую команду на хосте (на всех выделенных)">
+                                                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE756;" Style="{StaticResource Glyph}"/><TextBlock Text="Команды"/><TextBlock Text="&#xE70D;" Style="{StaticResource Glyph}" FontSize="9" Margin="6,1,0,0"/></StackPanel>
+                                            </Button>
+                                            <Button x:Name="HdSend" Style="{StaticResource Btn}" Margin="4,0,0,8" HorizontalContentAlignment="Left" ToolTip="Отправить файлы через scp (можно просто перетащить файлы на хост)">
+                                                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE898;" Style="{StaticResource Glyph}"/><TextBlock Text="Отправить файлы"/></StackPanel>
+                                            </Button>
+                                            <Button x:Name="HdGoodies" Style="{StaticResource Btn}" Margin="0,0,4,0" HorizontalContentAlignment="Left" ToolTip="micro, zsh, oh-my-zsh, powerlevel10k">
+                                                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE90F;" Style="{StaticResource Glyph}"/><TextBlock Text="Goodies"/><TextBlock Text="&#xE70D;" Style="{StaticResource Glyph}" FontSize="9" Margin="6,1,0,0"/></StackPanel>
+                                            </Button>
+                                            <Button x:Name="HdMore" Style="{StaticResource Btn}" Margin="4,0,0,0" HorizontalContentAlignment="Left">
+                                                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE712;" Style="{StaticResource Glyph}"/><TextBlock Text="Ещё"/><TextBlock Text="&#xE70D;" Style="{StaticResource Glyph}" FontSize="9" Margin="6,1,0,0"/></StackPanel>
+                                            </Button>
+                                        </UniformGrid>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border x:Name="HdFailBox" Style="{StaticResource CardBox}" BorderBrush="{StaticResource FailSoft}" Visibility="Collapsed">
+                                    <StackPanel>
+                                        <TextBlock Text="ВЫВОД ПРОВЕРКИ" Style="{StaticResource Caption}" Foreground="{StaticResource Fail}"/>
+                                        <TextBox x:Name="HdFail" Style="{StaticResource Code}" MaxHeight="160"/>
+                                        <Button x:Name="HdFixKey" Style="{StaticResource AccentBtn}" Margin="0,10,0,0" Padding="12,8" Visibility="Collapsed" ToolTip="Удалить старую запись из known_hosts и проверить снова">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8D7;" Style="{StaticResource Glyph}"/><TextBlock Text="Принять новый ключ хоста"/></StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                </Border>
+
+                                <Button x:Name="HdKeyToggle" Style="{StaticResource Btn}" Margin="0,0,0,2" HorizontalContentAlignment="Left" Padding="12,8">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock x:Name="HdKeyChevron" Text="&#xE76C;" Style="{StaticResource Glyph}" FontSize="11"/>
+                                        <TextBlock Text="&#xE8D7;" Style="{StaticResource Glyph}"/><TextBlock Text="Ключ, отпечаток, блок config"/>
+                                    </StackPanel>
+                                </Button>
+
+                                <Border x:Name="HdKeyCard" Style="{StaticResource CardBox}" Visibility="Collapsed">
+                                    <StackPanel>
+                                        <Grid>
+                                            <TextBlock Text="КЛЮЧ" Style="{StaticResource Caption}"/>
+                                        </Grid>
+                                        <TextBlock x:Name="HdKeyPath" FontFamily="{StaticResource MonoFont}" FontSize="12" TextWrapping="Wrap"/>
+                                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                            <TextBlock Text="&#xE928;" Style="{StaticResource Glyph}" FontSize="12" Foreground="{StaticResource Faint}" Margin="0,0,6,0"/>
+                                            <TextBlock x:Name="HdFp" FontFamily="{StaticResource MonoFont}" FontSize="11.5" Foreground="{StaticResource Sub}" TextTrimming="CharacterEllipsis"/>
+                                        </StackPanel>
+                                        <Grid Margin="0,12,0,0">
+                                            <TextBlock Text="ПУБЛИЧНЫЙ КЛЮЧ" Style="{StaticResource Caption}"/>
+                                            <Button x:Name="HdCopyPub2" Style="{StaticResource IconBtn}" Width="26" Height="26" FontSize="12" Content="&#xE8C8;" HorizontalAlignment="Right" Margin="0,-6,0,0" ToolTip="Копировать"/>
+                                        </Grid>
+                                        <TextBox x:Name="HdPub" Style="{StaticResource Code}"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border x:Name="HdCfgCard" Style="{StaticResource CardBox}" Visibility="Collapsed">
+                                    <StackPanel>
+                                        <Grid>
+                                            <TextBlock Text="БЛОК В CONFIG" Style="{StaticResource Caption}"/>
+                                            <Button x:Name="HdCopyCfg" Style="{StaticResource IconBtn}" Width="26" Height="26" FontSize="12" Content="&#xE8C8;" HorizontalAlignment="Right" Margin="0,-6,0,0" ToolTip="Копировать"/>
+                                        </Grid>
+                                        <TextBox x:Name="HdCfg" Style="{StaticResource Code}" TextWrapping="NoWrap"/>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+
+                    <!-- KEYS -->
+                    <Grid x:Name="PageKeys" Visibility="Collapsed">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="410"/></Grid.ColumnDefinitions>
+                        <ListView x:Name="KeyList" Style="{StaticResource List}" ItemTemplate="{StaticResource KeyRowT}" Padding="14,0,8,12"/>
+                        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="4,0,18,16">
+                            <StackPanel x:Name="KeyDetails">
+                                <Border Style="{StaticResource CardBox}" Padding="16">
+                                    <StackPanel>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                            <Grid Width="48" Height="48">
+                                                <Border x:Name="KdAvatarBg" CornerRadius="13"/>
+                                                <TextBlock x:Name="KdAvatar" Text="&#xE8D7;" FontFamily="{StaticResource IconFont}" FontSize="20" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Grid>
+                                            <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center">
+                                                <TextBlock x:Name="KdName" FontFamily="{StaticResource DisplayFont}" FontSize="20" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock x:Name="KdType" Style="{StaticResource SubText}"/>
+                                            </StackPanel>
+                                        </Grid>
+                                        <Button x:Name="KdCopy" Style="{StaticResource AccentBtn}" Margin="0,14,0,0" Padding="12,9">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8C8;" Style="{StaticResource Glyph}"/><TextBlock Text="Копировать публичный ключ"/></StackPanel>
+                                        </Button>
+                                        <UniformGrid Columns="2" Margin="0,8,0,0">
+                                            <Button x:Name="KdInstall" Style="{StaticResource Btn}" Margin="0,0,4,8" HorizontalContentAlignment="Left">
+                                                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE943;" Style="{StaticResource Glyph}"/><TextBlock Text="Для OpenSSH"/></StackPanel>
+                                            </Button>
+                                            <Button x:Name="KdDropbear" Style="{StaticResource Btn}" Margin="4,0,0,8" HorizontalContentAlignment="Left">
+                                                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE943;" Style="{StaticResource Glyph}"/><TextBlock Text="Для Dropbear"/></StackPanel>
+                                            </Button>
+                                            <Button x:Name="KdFp" Style="{StaticResource Btn}" Margin="0,0,4,8" HorizontalContentAlignment="Left">
+                                                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE928;" Style="{StaticResource Glyph}"/><TextBlock Text="Fingerprint"/></StackPanel>
+                                            </Button>
+                                            <Button x:Name="KdPath" Style="{StaticResource Btn}" Margin="4,0,0,8" HorizontalContentAlignment="Left">
+                                                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B7;" Style="{StaticResource Glyph}"/><TextBlock Text="Путь"/></StackPanel>
+                                            </Button>
+                                            <Button x:Name="KdExplorer" Style="{StaticResource Btn}" Margin="0,0,4,0" HorizontalContentAlignment="Left">
+                                                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE838;" Style="{StaticResource Glyph}"/><TextBlock Text="В проводнике"/></StackPanel>
+                                            </Button>
+                                            <Button x:Name="KdMore" Style="{StaticResource Btn}" Margin="4,0,0,0" HorizontalContentAlignment="Left">
+                                                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE712;" Style="{StaticResource Glyph}"/><TextBlock Text="Ещё"/><TextBlock Text="&#xE70D;" Style="{StaticResource Glyph}" FontSize="9" Margin="6,1,0,0"/></StackPanel>
+                                            </Button>
+                                        </UniformGrid>
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{StaticResource CardBox}">
+                                    <StackPanel>
+                                        <TextBlock Text="ИСПОЛЬЗУЕТСЯ ХОСТАМИ" Style="{StaticResource Caption}"/>
+                                        <WrapPanel x:Name="KdHosts" Margin="0,2,0,0"/>
+                                        <TextBlock x:Name="KdNoHosts" Text="Ни один хост в config не ссылается на этот ключ" Foreground="{StaticResource Warn}" FontSize="12" Visibility="Collapsed"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{StaticResource CardBox}">
+                                    <StackPanel>
+                                        <TextBlock Text="ФАЙЛЫ" Style="{StaticResource Caption}"/>
+                                        <TextBlock x:Name="KdFiles" FontFamily="{StaticResource MonoFont}" FontSize="12" TextWrapping="Wrap"/>
+                                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                            <TextBlock Text="&#xE928;" Style="{StaticResource Glyph}" FontSize="12" Foreground="{StaticResource Faint}" Margin="0,0,6,0"/>
+                                            <TextBlock x:Name="KdFpText" FontFamily="{StaticResource MonoFont}" FontSize="11.5" Foreground="{StaticResource Sub}" TextTrimming="CharacterEllipsis"/>
+                                        </StackPanel>
+                                        <TextBlock Text="ПУБЛИЧНЫЙ КЛЮЧ" Style="{StaticResource Caption}" Margin="2,12,0,6"/>
+                                        <TextBox x:Name="KdPub" Style="{StaticResource Code}"/>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+
+                    <!-- TERMINAL -->
+
+                    <!-- TERMINAL (ConEmu -InsideWnd) -->
+                    <DockPanel x:Name="PageTerminal" Visibility="Collapsed" Margin="26,0,18,14">
+                        <Border DockPanel.Dock="Top" Style="{StaticResource CardBox}" Padding="12,10" Margin="0,0,0,10">
+                            <StackPanel Orientation="Horizontal">
+                                <Button x:Name="TermPwsh" Style="{StaticResource Btn}" Padding="12,7">
+                                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE756;" Style="{StaticResource Glyph}"/><TextBlock Text="PowerShell"/></StackPanel>
+                                </Button>
+                                <Button x:Name="TermCmd" Style="{StaticResource Btn}" Padding="12,7" Margin="8,0,0,0">
+                                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE756;" Style="{StaticResource Glyph}"/><TextBlock Text="cmd"/></StackPanel>
+                                </Button>
+                                <Button x:Name="TermSsh" Style="{StaticResource Btn}" Padding="12,7" Margin="8,0,0,0">
+                                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE977;" Style="{StaticResource Glyph}"/><TextBlock Text="SSH к хосту"/><TextBlock Text="&#xE70D;" Style="{StaticResource Glyph}" FontSize="9" Margin="6,1,0,0"/></StackPanel>
+                                </Button>
+                                <Button x:Name="TermRestart" Style="{StaticResource Btn}" Padding="12,7" Margin="8,0,0,0" ToolTip="Перезапустить сессию">
+                                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" Style="{StaticResource Glyph}"/><TextBlock Text="Перезапустить"/></StackPanel>
+                                </Button>
+                                <Button x:Name="TermExternal" Style="{StaticResource GhostBtn}" Padding="12,7" Margin="8,0,0,0" ToolTip="Открыть в отдельном окне Windows Terminal">
+                                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8A7;" Style="{StaticResource Glyph}"/><TextBlock Text="В отдельном окне"/></StackPanel>
+                                </Button>
+                                <Button x:Name="TermSettings" Style="{StaticResource Btn}" Padding="12,7" Margin="8,0,0,0" ToolTip="Настройки ConEmu: цвета, шрифт, горячие клавиши. Применятся после «Перезапустить»">
+                                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE713;" Style="{StaticResource Glyph}"/><TextBlock Text="Настройки"/></StackPanel>
+                                </Button>
+                                <Button x:Name="TermGet" Style="{StaticResource GhostBtn}" Padding="12,7" Margin="8,0,0,0" ToolTip="Скачать или обновить ConEmu (Maximus5/ConEmu, портативная сборка)">
+                                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE896;" Style="{StaticResource Glyph}"/><TextBlock Text="Скачать ConEmu"/></StackPanel>
+                                </Button>
+                                <TextBlock x:Name="TermStatus" Text="" Foreground="{StaticResource Faint}" FontSize="12" VerticalAlignment="Center" Margin="14,0,0,0"/>
+                            </StackPanel>
+                        </Border>
+                        <Border x:Name="TermHint" DockPanel.Dock="Top" Style="{StaticResource CardBox}" Background="{StaticResource WarnSoft}" BorderBrush="{StaticResource WarnSoft}" Padding="12,9" Margin="0,0,0,10" Visibility="Collapsed">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="TermHintGlyph" Text="&#xE7BA;" Style="{StaticResource Glyph}" Foreground="{StaticResource Warn}"/>
+                                <TextBlock x:Name="TermHintText" Foreground="{StaticResource Warn}" TextWrapping="Wrap" FontSize="12.5"/>
+                            </StackPanel>
+                        </Border>
+                        <Border x:Name="TermHostArea" Background="#FF0C0C0C" CornerRadius="10" ClipToBounds="True"/>
+                    </DockPanel>
+
+                    <!-- SETTINGS -->
+                    <ScrollViewer x:Name="PageSettings" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" Padding="26,0,18,16">
+                        <StackPanel MaxWidth="620" HorizontalAlignment="Left">
+                            <Border Style="{StaticResource CardBox}">
+                                <StackPanel>
+                                    <TextBlock Text="СТАРТ" Style="{StaticResource Caption}"/>
+                                    <TextBlock Text="Раздел, который открывается при запуске" FontSize="13.5" Margin="0,2,0,0"/>
+                                    <TextBlock Text="Выбери, с какой страницы начинать работу." Foreground="{StaticResource Sub}" FontSize="12" Margin="0,2,0,8" TextWrapping="Wrap"/>
+                                    <ComboBox x:Name="SetStartupPage" Width="280" HorizontalAlignment="Left"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource CardBox}">
+                                <StackPanel>
+                                    <TextBlock Text="ОКНО" Style="{StaticResource Caption}"/>
+                                    <CheckBox x:Name="SetTray" Style="{StaticResource Switch}" Content="Сворачивать в трей вместо закрытия" Margin="0,4,0,0"/>
+                                    <CheckBox x:Name="SetHotKey" Style="{StaticResource Switch}" Content="Глобальный хоткей Ctrl+Alt+N (показать окно)" Margin="0,10,0,0"/>
+                                    <TextBlock Text="Хоткей применится после перезапуска приложения." Foreground="{StaticResource Faint}" FontSize="11.5" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource CardBox}">
+                                <StackPanel>
+                                    <TextBlock Text="ОБНОВЛЕНИЯ" Style="{StaticResource Caption}"/>
+                                    <TextBlock x:Name="SetVersion" FontSize="13.5" Margin="0,2,0,0"/>
+                                    <TextBlock x:Name="SetUpdStatus" Foreground="{StaticResource Sub}" FontSize="12" Margin="0,2,0,8" TextWrapping="Wrap"/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button x:Name="SetUpdCheck" Style="{StaticResource Btn}" Padding="12,7">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" Style="{StaticResource Glyph}"/><TextBlock Text="Проверить"/></StackPanel>
+                                        </Button>
+                                        <Button x:Name="SetUpdApply" Style="{StaticResource AccentBtn}" Padding="12,7" Margin="8,0,0,0" Visibility="Collapsed">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE896;" Style="{StaticResource Glyph}"/><TextBlock Text="Обновить"/></StackPanel>
+                                        </Button>
+                                        <Button x:Name="SetUpdSite" Style="{StaticResource GhostBtn}" Padding="12,7" Margin="8,0,0,0" ToolTip="Открыть репозиторий на GitHub">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE774;" Style="{StaticResource Glyph}"/><TextBlock Text="GitHub"/></StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                    <CheckBox x:Name="SetUpdAuto" Style="{StaticResource Switch}" Content="Проверять при запуске" Margin="0,10,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource CardBox}">
+                                <StackPanel>
+                                    <TextBlock Text="ДАННЫЕ" Style="{StaticResource Caption}"/>
+                                    <TextBlock x:Name="SetDataPath" FontFamily="{StaticResource MonoFont}" FontSize="12" Foreground="{StaticResource Sub}" TextWrapping="Wrap" Margin="0,2,0,8"/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button x:Name="SetOpenData" Style="{StaticResource Btn}" Padding="12,7">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE838;" Style="{StaticResource Glyph}"/><TextBlock Text="Открыть папку"/></StackPanel>
+                                        </Button>
+                                        <Button x:Name="SetOpenLog" Style="{StaticResource Btn}" Padding="12,7" Margin="8,0,0,0">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9D9;" Style="{StaticResource Glyph}"/><TextBlock Text="Журнал"/></StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <!-- WIFI -->
+                    <DockPanel x:Name="PageWifi" Visibility="Collapsed" Margin="26,0,18,14">
+                        <Border DockPanel.Dock="Top" Style="{StaticResource CardBox}" Padding="16,14">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock x:Name="WifiConn" Text="Wi-Fi" FontFamily="{StaticResource DisplayFont}" FontSize="16" FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="WifiConnMeta" Text="Соседние точки доступа: сигнал, диапазон, канал, шифрование, производитель по BSSID." Foreground="{StaticResource Sub}" FontSize="12.5" Margin="0,3,0,0" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="12,0,0,0">
+                                    <CheckBox x:Name="WifiAuto" Style="{StaticResource Switch}" Content="Каждые 10 с" Margin="0,0,14,0" VerticalAlignment="Center"/>
+                                    <Button x:Name="WifiScan" Style="{StaticResource AccentBtn}" Padding="16,9" VerticalAlignment="Center">
+                                        <StackPanel Orientation="Horizontal"><TextBlock x:Name="WifiScanGlyph" Text="&#xE72C;" Style="{StaticResource Glyph}"/><TextBlock Text="Сканировать"/></StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                        <Grid DockPanel.Dock="Top" Margin="4,8,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="54"/><ColumnDefinition Width="*"/><ColumnDefinition Width="150"/><ColumnDefinition Width="230"/><ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="СИГНАЛ" Style="{StaticResource Caption}" Margin="0"/>
+                            <TextBlock Grid.Column="1" Text="СЕТЬ / ЗАЩИТА" Style="{StaticResource Caption}" Margin="0"/>
+                            <TextBlock Grid.Column="2" Text="ДИАПАЗОН" Style="{StaticResource Caption}" Margin="0"/>
+                            <TextBlock Grid.Column="3" Text="BSSID / ПРОИЗВОДИТЕЛЬ" Style="{StaticResource Caption}" Margin="0"/>
+                        </Grid>
+                        <TextBlock x:Name="WifiEmpty" DockPanel.Dock="Top" Text="Нажми «Сканировать». netsh опрашивает эфир; на части адаптеров для списка сетей нужна включённая служба геолокации Windows." Foreground="{StaticResource Faint}" Margin="4,8,0,0" TextWrapping="Wrap"/>
+                        <ListView x:Name="WifiList" Style="{StaticResource List}" ItemTemplate="{StaticResource WifiRowT}" Margin="-10,0,0,0"/>
+                    </DockPanel>
+
+                    <!-- MONITOR -->
+                    <DockPanel x:Name="PageMonitor" Visibility="Collapsed" Margin="26,0,18,14">
+                        <Grid DockPanel.Dock="Top" Margin="0,0,0,0">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Border Style="{StaticResource CardBox}" Padding="16,14">
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="&#xE701;" Style="{StaticResource Glyph}" FontSize="16" Foreground="{StaticResource Accent}"/>
+                                            <TextBlock Text="Wi-Fi" Style="{StaticResource Caption}" Margin="0,0,0,0" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                        <TextBlock x:Name="WlanSsid" Text="—" FontFamily="{StaticResource DisplayFont}" FontSize="22" FontWeight="SemiBold" Margin="0,4,0,0"/>
+                                        <TextBlock x:Name="WlanMeta" Text="нет Wi-Fi адаптера или не подключён" Foreground="{StaticResource Sub}" FontSize="12.5" Margin="0,2,0,0" TextWrapping="Wrap"/>
+                                        <Grid Margin="0,10,0,0" Height="6">
+                                            <Border Background="{StaticResource Chip}" CornerRadius="3"/>
+                                            <Border x:Name="WlanBar" Background="{StaticResource Ok}" CornerRadius="3" HorizontalAlignment="Left" Width="0"/>
+                                        </Grid>
+                                        <TextBlock x:Name="WlanRates" Text="" Foreground="{StaticResource Faint}" FontSize="12" Margin="0,6,0,0" FontFamily="{StaticResource MonoFont}"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Top" HorizontalAlignment="Right">
+                                        <TextBlock x:Name="WlanSignal" Text="" FontFamily="{StaticResource DisplayFont}" FontSize="30" FontWeight="SemiBold" HorizontalAlignment="Right"/>
+                                        <TextBlock x:Name="WlanRssi" Text="" Foreground="{StaticResource Faint}" FontSize="12" HorizontalAlignment="Right"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                            <Border Grid.Column="2" Style="{StaticResource CardBox}" Padding="16,14">
+                                <StackPanel>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="&#xEC4A;" Style="{StaticResource Glyph}" FontSize="16" Foreground="{StaticResource Accent}"/>
+                                            <TextBlock Text="ТЕСТ СКОРОСТИ" Style="{StaticResource Caption}" Margin="0" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                        <Button x:Name="SpeedStart" Grid.Column="1" Style="{StaticResource AccentBtn}" Padding="14,6">
+                                            <StackPanel Orientation="Horizontal"><TextBlock x:Name="SpeedStartGlyph" Text="&#xE768;" Style="{StaticResource Glyph}"/><TextBlock x:Name="SpeedStartText" Text="Запустить"/></StackPanel>
+                                        </Button>
+                                    </Grid>
+                                    <UniformGrid Columns="3" Margin="0,8,0,0">
+                                        <StackPanel><TextBlock Text="ЗАГРУЗКА" Style="{StaticResource Caption}"/><StackPanel Orientation="Horizontal"><TextBlock x:Name="SpeedDown" Text="—" FontFamily="{StaticResource DisplayFont}" FontSize="26" FontWeight="SemiBold"/><TextBlock Text=" Мбит/с" Foreground="{StaticResource Faint}" VerticalAlignment="Bottom" Margin="0,0,0,5"/></StackPanel></StackPanel>
+                                        <StackPanel><TextBlock Text="ОТДАЧА" Style="{StaticResource Caption}"/><StackPanel Orientation="Horizontal"><TextBlock x:Name="SpeedUp" Text="—" FontFamily="{StaticResource DisplayFont}" FontSize="26" FontWeight="SemiBold"/><TextBlock Text=" Мбит/с" Foreground="{StaticResource Faint}" VerticalAlignment="Bottom" Margin="0,0,0,5"/></StackPanel></StackPanel>
+                                        <StackPanel><TextBlock Text="ЗАДЕРЖКА" Style="{StaticResource Caption}"/><StackPanel Orientation="Horizontal"><TextBlock x:Name="SpeedLat" Text="—" FontFamily="{StaticResource DisplayFont}" FontSize="26" FontWeight="SemiBold"/><TextBlock Text=" мс" Foreground="{StaticResource Faint}" VerticalAlignment="Bottom" Margin="0,0,0,5"/></StackPanel></StackPanel>
+                                    </UniformGrid>
+                                    <ProgressBar x:Name="SpeedProgress" Style="{StaticResource Progress}" Margin="0,6,0,0" Maximum="100" Value="0"/>
+                                    <Grid Margin="0,8,0,0">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <TextBox x:Name="SpeedUrl" Style="{StaticResource MonoField}" Height="30" FontSize="11.5" Tag="Cloudflare по умолчанию; можно URL своего файла (≥10 МБ)"/>
+                                        <TextBlock x:Name="SpeedStatus" Grid.Column="1" Text="" Foreground="{StaticResource Faint}" FontSize="11.5" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                        <Border DockPanel.Dock="Top" Style="{StaticResource CardBox}" Padding="16,12">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <TextBox x:Name="MonTarget" Style="{StaticResource MonoField}" Height="36" Tag="Адрес, имя или alias из config — Enter добавит в монитор"/>
+                                <Button x:Name="MonAdd" Grid.Column="1" Style="{StaticResource AccentBtn}" Padding="14,7" Margin="10,0,0,0">
+                                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE710;" Style="{StaticResource Glyph}"/><TextBlock Text="Следить"/></StackPanel>
+                                </Button>
+                                <Border Grid.Column="2" Style="{StaticResource SegBox}" Margin="14,0,0,0" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal">
+                                        <RadioButton x:Name="MiFast" Style="{StaticResource Seg}" GroupName="Mi" Content="2 с"/>
+                                        <RadioButton x:Name="MiNorm" Style="{StaticResource Seg}" GroupName="Mi" Content="5 с" IsChecked="True"/>
+                                        <RadioButton x:Name="MiSlow" Style="{StaticResource Seg}" GroupName="Mi" Content="30 с"/>
+                                    </StackPanel>
+                                </Border>
+                                <CheckBox x:Name="MonNotify" Grid.Column="3" Style="{StaticResource Switch}" Content="Звук при падении" Margin="14,0,0,0" IsChecked="True"/>
+                            </Grid>
+                        </Border>
+                        <TextBlock x:Name="MonEmpty" DockPanel.Dock="Top" Text="Добавь хосты — они будут пинговаться в фоне, а при падении или возврате придёт уведомление. Из списка хостов и сканера: правый клик → «В монитор»." Foreground="{StaticResource Faint}" Margin="4,8,0,0" TextWrapping="Wrap"/>
+                        <ListView x:Name="MonList" Style="{StaticResource List}" ItemTemplate="{StaticResource MonRowT}" Margin="-10,0,0,0"/>
+                    </DockPanel>
+
+                    <!-- VPN -->
+                    <DockPanel x:Name="PageVpn" Visibility="Collapsed" Margin="26,0,18,14">
+                        <Border DockPanel.Dock="Top" Style="{StaticResource CardBox}" Padding="16,14">
+                            <StackPanel>
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <WrapPanel>
+                                            <TextBlock Text="VLESS через xray (ядро Happ), Hysteria2 через mihomo" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                            <Border x:Name="VpnStatePill" Style="{StaticResource Pill}"><TextBlock x:Name="VpnState" FontSize="12"/></Border>
+                                        </WrapPanel>
+                                        <TextBlock Text="Профиль поднимается как локальный SOCKS5/HTTP-прокси и ставится системным прокси Windows (браузеры, .NET, большинство приложений). Локальные сети идут мимо. Режим TUN (весь трафик) — следующим шагом." Foreground="{StaticResource Sub}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                                        <TextBlock x:Name="VpnEngine" Foreground="{StaticResource Faint}" FontFamily="{StaticResource MonoFont}" FontSize="11.5" Margin="0,6,0,0" TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="14,0,0,0" VerticalAlignment="Center">
+                                        <Button x:Name="VpnDisconnect" Style="{StaticResource Btn}" Padding="14,9" Margin="0,0,8,0" Visibility="Collapsed">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE71A;" Style="{StaticResource Glyph}"/><TextBlock Text="Отключить"/></StackPanel>
+                                        </Button>
+                                        <Button x:Name="VpnAdd" Style="{StaticResource AccentBtn}" Padding="16,9">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE710;" Style="{StaticResource Glyph}"/><TextBlock Text="Добавить профиль"/></StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                </Grid>
+                                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                    <Button x:Name="VpnPortBtn" Style="{StaticResource Btn}" Padding="10,5" ToolTip="Локальный порт прокси (по умолчанию 2080)">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8AB;" Style="{StaticResource Glyph}" FontSize="12"/><TextBlock Text="Порт"/></StackPanel>
+                                    </Button>
+                                    <Button x:Name="VpnInstallBtn" Style="{StaticResource Btn}" Padding="10,5" Margin="6,0,0,0" ToolTip="Скачать или обновить движок с GitHub (спрошу перед загрузкой)">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE896;" Style="{StaticResource Glyph}" FontSize="12"/><TextBlock Text="Скачать / обновить движок"/><TextBlock Text="&#xE70D;" Style="{StaticResource Glyph}" FontSize="9" Margin="6,1,0,0"/></StackPanel>
+                                    </Button>
+                                    <Button x:Name="VpnFolderBtn" Style="{StaticResource GhostBtn}" Padding="10,5" Margin="6,0,0,0" ToolTip="Папка движков, конфигов и vpn.log">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE838;" Style="{StaticResource Glyph}" FontSize="12"/><TextBlock Text="Папка"/></StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                        <Border x:Name="VpnBanner" DockPanel.Dock="Top" Style="{StaticResource CardBox}" Background="{StaticResource WarnSoft}" BorderBrush="{StaticResource WarnSoft}" Padding="12,9" Margin="0,8,0,0" Visibility="Collapsed">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="VpnBannerGlyph" Text="&#xE7BA;" Style="{StaticResource Glyph}" Foreground="{StaticResource Warn}"/>
+                                <TextBlock x:Name="VpnBannerText" Foreground="{StaticResource Warn}" TextWrapping="Wrap" FontSize="12.5"/>
+                            </StackPanel>
+                        </Border>
+                        <Border x:Name="VpnLogBox" DockPanel.Dock="Bottom" Style="{StaticResource CardBox}" Padding="12,8" Margin="0,8,0,0" Visibility="Collapsed">
+                            <StackPanel>
+                                <TextBlock Text="ЖУРНАЛ ДВИЖКА" Style="{StaticResource Caption}"/>
+                                <TextBox x:Name="VpnLog" Style="{StaticResource Code}" MaxHeight="150" TextWrapping="NoWrap" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"/>
+                            </StackPanel>
+                        </Border>
+                        <TextBlock x:Name="VpnEmpty" DockPanel.Dock="Top" Text="Пока ни одного профиля. В Happ: профиль → «Копировать ссылку» → сюда «Добавить профиль». Подойдёт и адрес подписки." Foreground="{StaticResource Faint}" Margin="4,8,0,0" TextWrapping="Wrap"/>
+                        <ListView x:Name="VpnList" Style="{StaticResource List}" ItemTemplate="{StaticResource VpnRowT}" Margin="-10,0,0,0"/>
+                    </DockPanel>
+
+                    <!-- TUNNELS -->
+                    <DockPanel x:Name="PageTunnels" Visibility="Collapsed" Margin="26,0,18,14">
+                        <Border DockPanel.Dock="Top" Style="{StaticResource CardBox}" Padding="16,14">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="Пробросы портов через SSH" FontWeight="SemiBold" FontSize="14"/>
+                                    <TextBlock Text="-L: локальный порт → сервис за хостом · -D: SOCKS-прокси через хост · -R: порт на хосте → сюда. Туннель живёт как фоновый ssh -N, падение видно в статусе." Foreground="{StaticResource Sub}" FontSize="12" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                                </StackPanel>
+                                <Button x:Name="TunnelAdd" Grid.Column="1" Style="{StaticResource AccentBtn}" Padding="16,9" Margin="14,0,0,0" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE710;" Style="{StaticResource Glyph}"/><TextBlock Text="Добавить туннель"/></StackPanel>
+                                </Button>
+                            </Grid>
+                        </Border>
+                        <TextBlock x:Name="TunnelEmpty" DockPanel.Dock="Top" Text="Пока ни одного туннеля. Пример: локальный 8006 → 192.168.200.30:8006 через хост crm — и Proxmox открывается как https://localhost:8006." Foreground="{StaticResource Faint}" Margin="4,8,0,0" TextWrapping="Wrap"/>
+                        <ListView x:Name="TunnelList" Style="{StaticResource List}" ItemTemplate="{StaticResource TunnelRowT}" Margin="-10,0,0,0"/>
+                    </DockPanel>
+
+                    <!-- SCANNER -->
+                    <DockPanel x:Name="PageScan" Visibility="Collapsed" Margin="26,0,18,14">
+                        <Border DockPanel.Dock="Top" Style="{StaticResource CardBox}" Padding="16,14">
+                            <StackPanel>
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <TextBox x:Name="ScanRange" Style="{StaticResource MonoField}" Height="40" FontSize="14.5" Tag="192.168.1.0/24 · 10.0.0.1-50 · 192.168.5.* · 192.168.5 · через запятую"/>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="10,0,0,0">
+                                        <Button x:Name="ScanStart" Style="{StaticResource AccentBtn}" Padding="18,9">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE768;" Style="{StaticResource Glyph}"/><TextBlock Text="Сканировать"/></StackPanel>
+                                        </Button>
+                                        <Button x:Name="ScanStop" Style="{StaticResource Btn}" Padding="14,9" Margin="8,0,0,0" IsEnabled="False">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE71A;" Style="{StaticResource Glyph}"/><TextBlock Text="Стоп"/></StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                </Grid>
+                                <WrapPanel x:Name="ScanChips" Margin="0,10,0,0"/>
+                                <Grid Margin="0,6,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="Порты:" Foreground="{StaticResource Sub}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBox x:Name="ScanPorts" Grid.Column="1" Style="{StaticResource MonoField}" Height="32" FontSize="12.5" Text="22,80,443,3389,445,8006,8080,8123,8443,8291"/>
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="14,0,0,0">
+                                        <CheckBox x:Name="ScanNames" Style="{StaticResource Switch}" IsChecked="True" Content="Имена" Margin="0,0,14,0"/>
+                                        <CheckBox x:Name="ScanBind" Style="{StaticResource Switch}" IsChecked="True" Content="Мимо туннеля" ToolTip="Для адресов из подключённых подсетей сокет привязывается к LAN-адаптеру: VPN/прокси не подменит «открытый порт»"/>
+                                        <Button x:Name="ScanExport" Style="{StaticResource Btn}" Padding="10,5" Margin="16,0,0,0" ToolTip="Сохранить список в CSV (Excel) или TSV">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74E;" Style="{StaticResource Glyph}" FontSize="12"/><TextBlock Text="CSV"/></StackPanel>
+                                        </Button>
+                                        <Button x:Name="SubnetCalcBtn" Style="{StaticResource Btn}" Padding="10,5" Margin="6,0,0,0" ToolTip="Калькулятор подсетей">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8EF;" Style="{StaticResource Glyph}" FontSize="12"/><TextBlock Text="Подсеть"/></StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                </Grid>
+                                <ProgressBar x:Name="ScanProgress" Style="{StaticResource Progress}" Margin="0,12,0,0" Maximum="100" Value="0"/>
+                            </StackPanel>
+                        </Border>
+                        <Border x:Name="ScanRouteBox" DockPanel.Dock="Top" Style="{StaticResource CardBox}" Padding="12,8,12,9" Margin="0,8,0,0" HorizontalAlignment="Left" Visibility="Collapsed">
+                            <StackPanel>
+                                <TextBlock x:Name="ScanRouteCap" Text="МАРШРУТ ДО СЕТИ" Style="{StaticResource Caption}"/>
+                                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Margin="0,2,0,0">
+                                    <StackPanel x:Name="ScanHops" Orientation="Horizontal"/>
+                                </ScrollViewer>
+                            </StackPanel>
+                        </Border>
+                        <ListView x:Name="ScanList" Style="{StaticResource List}" ItemTemplate="{StaticResource ScanRowT}" Margin="-10,0,0,0"/>
+                    </DockPanel>
+
+                    <!-- PORTS -->
+                    <Grid x:Name="PagePorts" Visibility="Collapsed" Margin="26,0,18,14">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                        <Border Style="{StaticResource CardBox}" Padding="16,14">
+                            <StackPanel>
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <TextBox x:Name="PortTarget" Style="{StaticResource MonoField}" Height="40" FontSize="14.5" Tag="Хост, IP или подсеть для nmap"/>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="10,0,0,0">
+                                        <Button x:Name="PortStart" Style="{StaticResource AccentBtn}" Padding="18,9">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE768;" Style="{StaticResource Glyph}"/><TextBlock Text="Сканировать"/></StackPanel>
+                                        </Button>
+                                        <Button x:Name="PortStop" Style="{StaticResource Btn}" Padding="14,9" Margin="8,0,0,0" IsEnabled="False">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE71A;" Style="{StaticResource Glyph}"/><TextBlock Text="Стоп"/></StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                </Grid>
+                                <WrapPanel Margin="0,12,0,0">
+                                    <Border Style="{StaticResource SegBox}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <RadioButton x:Name="PmStd" Style="{StaticResource Seg}" GroupName="Pm" IsChecked="True" Content="Стандарт · 44" ToolTip="Частые сервисные порты"/>
+                                            <RadioButton x:Name="PmExt" Style="{StaticResource Seg}" GroupName="Pm" Content="Расширенный · 1000" ToolTip="nmap --top-ports 1000 (без nmap — 1–1024 и популярные)"/>
+                                            <RadioButton x:Name="PmAll" Style="{StaticResource Seg}" GroupName="Pm" Content="Все 65535"/>
+                                            <RadioButton x:Name="PmCustom" Style="{StaticResource Seg}" GroupName="Pm" Content="Диапазон"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <TextBox x:Name="PortRange" Style="{StaticResource MonoField}" Width="220" Height="34" Margin="10,0,0,0" FontSize="12.5" Tag="1-1024,3389,8000-8100" Visibility="Collapsed"/>
+                                    <CheckBox x:Name="PortUseNmap" Style="{StaticResource Switch}" Content="nmap" Margin="16,0,0,0" ToolTip="Сканировать через nmap -sT (иначе встроенный TCP connect)"/>
+                                    <CheckBox x:Name="PortVersions" Style="{StaticResource Switch}" Content="Версии (-sV)" Margin="14,0,0,0"/>
+                                    <CheckBox x:Name="PortNoPing" Style="{StaticResource Switch}" Content="Без пинга (-Pn)" Margin="14,0,0,0" IsChecked="True"/>
+                                </WrapPanel>
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="nmap:" Foreground="{StaticResource Faint}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBox x:Name="NmapArgs" Grid.Column="1" Style="{StaticResource MonoField}" Height="30" FontSize="12" Tag="доп. аргументы nmap, например --script http-title"/>
+                                </Grid>
+                                <ProgressBar x:Name="PortProgress" Style="{StaticResource Progress}" Margin="0,12,0,0" Maximum="100" Value="0"/>
+                            </StackPanel>
+                        </Border>
+                        <Grid Grid.Row="1">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="380"/></Grid.ColumnDefinitions>
+                            <ListView x:Name="PortList" Style="{StaticResource List}" ItemTemplate="{StaticResource PortRowT}" Margin="-10,0,8,0"/>
+                            <Border Grid.Column="1" Style="{StaticResource CardBox}" Margin="0" Padding="10">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Text="ЖУРНАЛ" Style="{StaticResource Caption}" Margin="4,0,0,6"/>
+                                    <TextBox x:Name="PortLog" Style="{StaticResource Code}" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" FontSize="11.5"/>
+                                </DockPanel>
+                            </Border>
+                        </Grid>
+                    </Grid>
+
+                    <!-- PING -->
+                    <Grid x:Name="PagePing" Visibility="Collapsed" Margin="26,0,18,14">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                        <Border Style="{StaticResource CardBox}" Padding="16,14">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <TextBox x:Name="PingTarget" Style="{StaticResource MonoField}" Height="40" FontSize="14.5" Tag="Адрес или имя — Enter для старта"/>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="10,0,0,0">
+                                    <Border Style="{StaticResource SegBox}" Margin="0,0,10,0" VerticalAlignment="Center">
+                                        <StackPanel Orientation="Horizontal">
+                                            <RadioButton x:Name="PiFast" Style="{StaticResource Seg}" GroupName="Pi" Content="0.2 с"/>
+                                            <RadioButton x:Name="PiNorm" Style="{StaticResource Seg}" GroupName="Pi" Content="1 с" IsChecked="True"/>
+                                            <RadioButton x:Name="PiSlow" Style="{StaticResource Seg}" GroupName="Pi" Content="5 с"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <Button x:Name="PingStart" Style="{StaticResource AccentBtn}" Padding="18,9">
+                                        <StackPanel Orientation="Horizontal"><TextBlock x:Name="PingStartGlyph" Text="&#xE768;" Style="{StaticResource Glyph}"/><TextBlock x:Name="PingStartText" Text="Пинг"/></StackPanel>
+                                    </Button>
+                                    <Button x:Name="TraceStart" Style="{StaticResource Btn}" Padding="14,9" Margin="8,0,0,0">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE81E;" Style="{StaticResource Glyph}"/><TextBlock Text="Трассировка"/></StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                        <UniformGrid Grid.Row="1" Columns="5" Margin="-6,0,-6,0">
+                            <Border Style="{StaticResource CardBox}" Margin="6,0,6,12"><StackPanel><TextBlock Text="ПОСЛЕДНИЙ" Style="{StaticResource Caption}"/><TextBlock x:Name="PsLast" Text="—" FontFamily="{StaticResource DisplayFont}" FontSize="24" FontWeight="SemiBold"/></StackPanel></Border>
+                            <Border Style="{StaticResource CardBox}" Margin="6,0,6,12"><StackPanel><TextBlock Text="МИНИМУМ" Style="{StaticResource Caption}"/><TextBlock x:Name="PsMin" Text="—" FontFamily="{StaticResource DisplayFont}" FontSize="24" FontWeight="SemiBold"/></StackPanel></Border>
+                            <Border Style="{StaticResource CardBox}" Margin="6,0,6,12"><StackPanel><TextBlock Text="СРЕДНЕЕ" Style="{StaticResource Caption}"/><TextBlock x:Name="PsAvg" Text="—" FontFamily="{StaticResource DisplayFont}" FontSize="24" FontWeight="SemiBold"/></StackPanel></Border>
+                            <Border Style="{StaticResource CardBox}" Margin="6,0,6,12"><StackPanel><TextBlock Text="МАКСИМУМ" Style="{StaticResource Caption}"/><TextBlock x:Name="PsMax" Text="—" FontFamily="{StaticResource DisplayFont}" FontSize="24" FontWeight="SemiBold"/></StackPanel></Border>
+                            <Border Style="{StaticResource CardBox}" Margin="6,0,6,12"><StackPanel><TextBlock Text="ПОТЕРИ" Style="{StaticResource Caption}"/><TextBlock x:Name="PsLoss" Text="—" FontFamily="{StaticResource DisplayFont}" FontSize="24" FontWeight="SemiBold"/></StackPanel></Border>
+                        </UniformGrid>
+                        <Border Grid.Row="2" Style="{StaticResource CardBox}" Padding="10" Height="170">
+                            <Grid>
+                                <TextBlock x:Name="ChartMax" Text="" FontSize="10.5" Foreground="{StaticResource Faint}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="4,0,0,0"/>
+                                <Canvas x:Name="PingChart" ClipToBounds="True" Margin="0,14,0,0"/>
+                                <TextBlock x:Name="ChartHint" Text="График задержки появится после старта" Foreground="{StaticResource Faint}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
+                        <Grid Grid.Row="3">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Border Style="{StaticResource CardBox}" Margin="0,0,6,0" Padding="8">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Text="ОТВЕТЫ" Style="{StaticResource Caption}" Margin="8,2,0,4"/>
+                                    <ListView x:Name="PingLog" Style="{StaticResource List}" ItemTemplate="{StaticResource LineRowT}"/>
+                                </DockPanel>
+                            </Border>
+                            <Border Grid.Column="1" Style="{StaticResource CardBox}" Margin="6,0,0,0" Padding="8">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Text="ТРАССИРОВКА" Style="{StaticResource Caption}" Margin="8,2,0,4"/>
+                                    <ListView x:Name="TraceLog" Style="{StaticResource List}" ItemTemplate="{StaticResource LineRowT}"/>
+                                </DockPanel>
+                            </Border>
+                        </Grid>
+                    </Grid>
+
+                    <!-- DNS -->
+                    <DockPanel x:Name="PageDns" Visibility="Collapsed" Margin="26,0,18,14">
+                        <Border DockPanel.Dock="Top" Style="{StaticResource CardBox}" Padding="16,14">
+                            <StackPanel>
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <TextBox x:Name="DnsName" Style="{StaticResource MonoField}" Height="40" FontSize="14.5" Tag="Имя или IP (для PTR) — Enter"/>
+                                    <Button x:Name="DnsStart" Grid.Column="1" Style="{StaticResource AccentBtn}" Padding="18,9" Margin="10,0,0,0">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE721;" Style="{StaticResource Glyph}"/><TextBlock Text="Запросить"/></StackPanel>
+                                    </Button>
+                                </Grid>
+                                <WrapPanel Margin="0,12,0,0">
+                                    <Border Style="{StaticResource SegBox}">
+                                        <StackPanel x:Name="DnsTypes" Orientation="Horizontal">
+                                            <RadioButton Style="{StaticResource Seg}" GroupName="Dt" Content="A" IsChecked="True"/>
+                                            <RadioButton Style="{StaticResource Seg}" GroupName="Dt" Content="AAAA"/>
+                                            <RadioButton Style="{StaticResource Seg}" GroupName="Dt" Content="CNAME"/>
+                                            <RadioButton Style="{StaticResource Seg}" GroupName="Dt" Content="MX"/>
+                                            <RadioButton Style="{StaticResource Seg}" GroupName="Dt" Content="TXT"/>
+                                            <RadioButton Style="{StaticResource Seg}" GroupName="Dt" Content="NS"/>
+                                            <RadioButton Style="{StaticResource Seg}" GroupName="Dt" Content="SOA"/>
+                                            <RadioButton Style="{StaticResource Seg}" GroupName="Dt" Content="PTR"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <TextBox x:Name="DnsExtra" Style="{StaticResource MonoField}" Width="200" Height="34" Margin="12,0,0,0" FontSize="12.5" Tag="+ свой DNS-сервер"/>
+                                </WrapPanel>
+                                <TextBlock Text="Запрос уходит одновременно в системный резолвер, шлюз и публичные DNS — сразу видно подмену (fake-ip) и блокировки." Foreground="{StaticResource Faint}" FontSize="12" Margin="2,10,0,0" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+                        <ListView x:Name="DnsList" Style="{StaticResource List}" ItemTemplate="{StaticResource DnsRowT}" Margin="-10,0,0,0"/>
+                    </DockPanel>
+                </Grid>
+
+                <!-- toast -->
+                <Border x:Name="Toast" Grid.RowSpan="3" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,26"
+                        Background="{StaticResource Card}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="10" Padding="14,9" Opacity="0" IsHitTestVisible="False">
+                    <Border.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="3" Opacity="0.35"/></Border.Effect>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock x:Name="ToastGlyph" Text="&#xE73E;" Style="{StaticResource Glyph}" Foreground="{StaticResource Ok}"/>
+                        <TextBlock x:Name="ToastText" Text=""/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
