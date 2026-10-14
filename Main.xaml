@@ -682,6 +682,11 @@
                                 <TextBlock x:Name="TermHintText" Foreground="{StaticResource Warn}" TextWrapping="Wrap" FontSize="12.5"/>
                             </StackPanel>
                         </Border>
+                        <!-- our own tab strip; ConEmu's native tab bar is hidden -->
+                        <DockPanel x:Name="TermTabBar" DockPanel.Dock="Top" Margin="0,0,0,6" Visibility="Collapsed">
+                            <Button x:Name="TermTabAdd" DockPanel.Dock="Right" Style="{StaticResource IconBtn}" Width="30" Height="30" Content="&#xE710;" ToolTip="Новая вкладка PowerShell"/>
+                            <WrapPanel x:Name="TermTabs"/>
+                        </DockPanel>
                         <Border x:Name="TermHostArea" Background="#FF0C0C0C" CornerRadius="10" ClipToBounds="True"/>
                     </DockPanel>
 
@@ -699,6 +704,9 @@
 
                             <Border Style="{StaticResource CardBox}">
                                 <StackPanel>
+                                    <TextBlock Text="ТЕМА" Style="{StaticResource Caption}"/>
+                                    <ComboBox x:Name="SetTheme" Width="280" HorizontalAlignment="Left" Margin="0,2,0,4"/>
+                                    <TextBlock Text="Стеклянные темы — акриловое размытие Windows 11 за окном. Применяется с перезапуском." Foreground="{StaticResource Faint}" FontSize="11.5" Margin="0,0,0,12" TextWrapping="Wrap"/>
                                     <TextBlock Text="ОКНО" Style="{StaticResource Caption}"/>
                                     <CheckBox x:Name="SetTray" Style="{StaticResource Switch}" Content="Сворачивать в трей вместо закрытия" Margin="0,4,0,0"/>
                                     <CheckBox x:Name="SetHotKey" Style="{StaticResource Switch}" Content="Глобальный хоткей Ctrl+Alt+N (показать окно)" Margin="0,10,0,0"/>

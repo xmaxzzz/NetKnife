@@ -47,35 +47,75 @@ function Test-SystemDark {
     } catch { return $true }
 }
 
-function Get-Palette {
-    param([bool]$Dark, [switch]$Glass)
+# Theme catalogue: key → label (Settings dropdown). "system" follows Windows (dark/light).
+$script:Themes = [ordered]@{
+    "system"        = "Как в системе"
+    "dark"          = "Тёмная"
+    "dark-blue"     = "Тёмная · синяя"
+    "midnight"      = "Полночь (чёрная)"
+    "glass"         = "Стекло"
+    "glass-blue"    = "Стекло · синее"
+    "glass-purple"  = "Стекло · фиолетовое"
+    "glass-emerald" = "Стекло · изумруд"
+    "light"         = "Светлая"
+}
 
-    # "liquid glass": the window itself is transparent and Windows draws an acrylic blur behind it (Set-WindowChrome);
-    # surfaces are tinted glass over that. Dialogs get DialogBg (opaque) because they have no backdrop.
-    if ($Glass) {
+function Get-Palette {
+    param([string]$Name = "dark")
+
+    # "glass": the window itself is transparent and Windows draws an acrylic blur behind it (Set-WindowChrome);
+    # surfaces are tinted glass over that. DialogBg is opaque (dialogs have no backdrop); TermBg is the opaque
+    # colour the embedded terminal paints so it blends with the page.
+    if ($Name -like "glass*") {
+        $Tint = switch ($Name) { "glass-blue" { "#5C0F1830" } "glass-purple" { "#5C1A1230" } "glass-emerald" { "#5C0E201C" } default { "#5C14161C" } }
+        $Acc  = switch ($Name) { "glass-purple" { "#FFA78BFA" } "glass-emerald" { "#FF34D399" } default { "#FF6E9BFF" } }
+        $AccS = switch ($Name) { "glass-purple" { "#4DA78BFA" } "glass-emerald" { "#4D34D399" } default { "#4D5B8CFF" } }
+        $Term = switch ($Name) { "glass-blue" { "#FF151B2A" } "glass-purple" { "#FF1B1626" } "glass-emerald" { "#FF13201C" } default { "#FF1A1C22" } }
         return [ordered]@{
-            WindowBg = "#00000000"; Surface = "#5C14161C"; Card = "#5A262931"; CardHover = "#7A2C3039"
+            WindowBg = "#00000000"; Surface = $Tint; Card = "#5A262931"; CardHover = "#7A2C3039"
             Selected = "#8027324A"; Line = "#2AFFFFFF"; Text = "#FFF2F4F8"; Sub = "#FFB4BCCA"; Faint = "#FF8A92A2"
-            Accent = "#FF6E9BFF"; AccentSoft = "#4D5B8CFF"; Chip = "#5A30343E"; CodeBg = "#9916181D"
+            Accent = $Acc; AccentSoft = $AccS; Chip = "#5A30343E"; CodeBg = "#9916181D"
             Ok = "#FF4CC95E"; OkSoft = "#3A3FB950"; Fail = "#FFFF7B71"; FailSoft = "#3DF85149"
             Warn = "#FFE8BD4F"; WarnSoft = "#3AE3B341"; HoverOverlay = "#18FFFFFF"; NavHover = "#18FFFFFF"; NavSel = "#2AFFFFFF"
-            DialogBg = "#FF1E2026"
+            DialogBg = "#FF1E2026"; TermBg = $Term
         }
     }
 
-    if ($Dark) {
+    if ($Name -eq "midnight") {
+        return [ordered]@{
+            WindowBg = "#FF000000"; Surface = "#FF0A0A0C"; Card = "#FF141418"; CardHover = "#FF1C1C22"
+            Selected = "#FF1B2438"; Line = "#FF222228"; Text = "#FFEDEEF2"; Sub = "#FF9DA4B2"; Faint = "#FF666C78"
+            Accent = "#FF5B8CFF"; AccentSoft = "#405B8CFF"; Chip = "#FF1E1E24"; CodeBg = "#FF070708"
+            Ok = "#FF3FB950"; OkSoft = "#2E3FB950"; Fail = "#FFFF6B61"; FailSoft = "#33F85149"
+            Warn = "#FFE3B341"; WarnSoft = "#30E3B341"; HoverOverlay = "#14FFFFFF"; NavHover = "#14FFFFFF"; NavSel = "#22FFFFFF"
+            DialogBg = "#FF0E0E11"; TermBg = "#FF0A0A0C"
+        }
+    }
+
+    if ($Name -eq "dark-blue") {
+        return [ordered]@{
+            WindowBg = "#FF151A26"; Surface = "#F2191F2E"; Card = "#FF222A3C"; CardHover = "#FF283145"
+            Selected = "#FF263556"; Line = "#FF30394E"; Text = "#FFECEFF6"; Sub = "#FFA6AFC4"; Faint = "#FF6F788E"
+            Accent = "#FF6E9BFF"; AccentSoft = "#405B8CFF"; Chip = "#FF2C3448"; CodeBg = "#FF121724"
+            Ok = "#FF3FB950"; OkSoft = "#2E3FB950"; Fail = "#FFFF6B61"; FailSoft = "#33F85149"
+            Warn = "#FFE3B341"; WarnSoft = "#30E3B341"; HoverOverlay = "#14FFFFFF"; NavHover = "#14FFFFFF"; NavSel = "#22FFFFFF"
+            DialogBg = "#FF191F2E"; TermBg = "#FF191F2E"
+        }
+    }
+
+    if ($Name -ne "light") {
         return [ordered]@{
             WindowBg = "#FF1A1B20"; Surface = "#F21E2026"; Card = "#FF262931"; CardHover = "#FF2C3039"
             Selected = "#FF27324A"; Line = "#FF333743"; Text = "#FFECEEF3"; Sub = "#FFA3ABBA"; Faint = "#FF6E7685"
             Accent = "#FF5B8CFF"; AccentSoft = "#405B8CFF"; Chip = "#FF30343E"; CodeBg = "#FF16181D"
             Ok = "#FF3FB950"; OkSoft = "#2E3FB950"; Fail = "#FFFF6B61"; FailSoft = "#33F85149"
             Warn = "#FFE3B341"; WarnSoft = "#30E3B341"; HoverOverlay = "#14FFFFFF"; NavHover = "#14FFFFFF"; NavSel = "#22FFFFFF"
-            DialogBg = "#FF1E2026"
+            DialogBg = "#FF1E2026"; TermBg = "#FF1E2026"
         }
     }
 
     return [ordered]@{
-        DialogBg = "#FFFBFBFD"
+        DialogBg = "#FFFBFBFD"; TermBg = "#FFFBFBFD"
         WindowBg = "#FFF3F4F7"; Surface = "#F5FBFBFD"; Card = "#FFFFFFFF"; CardHover = "#FFF2F4F8"
         Selected = "#FFE7EEFF"; Line = "#FFE1E5EC"; Text = "#FF1B1F27"; Sub = "#FF586172"; Faint = "#FF8B94A3"
         Accent = "#FF2F6BFF"; AccentSoft = "#302F6BFF"; Chip = "#FFEEF1F6"; CodeBg = "#FFF3F5F9"
@@ -199,6 +239,15 @@ function Stop-ChildJob {
     if ($script:NativeOk -and $script:ChildJob -ne [IntPtr]::Zero) {
         try { [void][NetKnife.Native]::TerminateJobObject($script:ChildJob, 0) } catch { }
     }
+}
+
+# Relaunch (theme change): the whole XAML is built from the palette at startup
+function Restart-App {
+    $script:ReallyExit = $true
+    $Vbs = Join-Path $script:AppDir "launch.vbs"
+    if (Test-Path $Vbs) { Start-Process "$env:WINDIR\System32\wscript.exe" -ArgumentList (Quote-Arg $Vbs) }
+    else { Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList "-NoProfile -STA -ExecutionPolicy Bypass -File $(Quote-Arg (Join-Path $script:AppDir 'NetKnife.ps1'))" -WindowStyle Hidden }
+    $script:Win.Close()
 }
 
 function Set-WindowChrome {

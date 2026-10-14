@@ -17,6 +17,14 @@ function Initialize-SettingsPage {
         if ($V) { $script:Settings.StartupPage = "$V"; Save-Settings }
     })
 
+    $Ui.SetTheme.ItemsSource = @(foreach ($K in $script:Themes.Keys) { [pscustomobject]@{ Key = $K; Label = $script:Themes[$K] } })
+    $Ui.SetTheme.DisplayMemberPath = "Label"; $Ui.SetTheme.SelectedValuePath = "Key"
+    $Ui.SetTheme.SelectedValue = $(if ($script:Themes.Contains("$($script:Settings.Theme)")) { "$($script:Settings.Theme)" } else { "system" })
+    $Ui.SetTheme.Add_SelectionChanged({
+        $V = "$($Ui.SetTheme.SelectedValue)"
+        if ($V -and $V -ne "$($script:Settings.Theme)") { $script:Settings.Theme = $V; Save-Settings; Restart-App }
+    })
+
     $Ui.SetTray.IsChecked = [bool]$script:Settings.MinimizeToTray
     $Ui.SetTray.Add_Click({ $script:Settings.MinimizeToTray = [bool]$Ui.SetTray.IsChecked; Save-Settings })
 

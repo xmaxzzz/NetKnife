@@ -41,9 +41,13 @@ function Write-AppLog {
 # ---------------------------------------------------------------- theme + window
 
 $script:Settings = Get-Settings
-$script:IsGlass = ("$($script:Settings.Theme)" -eq "glass") -and ([Environment]::OSVersion.Version.Build -ge 22621)
-$script:IsDark = switch ($script:Settings.Theme) { "dark" { $true } "glass" { $true } "light" { $false } default { Test-SystemDark } }
-$script:Palette = Get-Palette $script:IsDark -Glass:$script:IsGlass
+$script:ThemeName = "$($script:Settings.Theme)"
+if (-not $script:Themes.Contains($script:ThemeName)) { $script:ThemeName = "system" }
+if ($script:ThemeName -eq "system") { $script:ThemeName = $(if (Test-SystemDark) { "dark" } else { "light" }) }
+if ($script:ThemeName -like "glass*" -and [Environment]::OSVersion.Version.Build -lt 22621) { $script:ThemeName = "dark" }   # acrylic needs Win11 22H2
+$script:IsGlass = ($script:ThemeName -like "glass*")
+$script:IsDark = ($script:ThemeName -ne "light")
+$script:Palette = Get-Palette $script:ThemeName
 
 if ($script:NativeOk) { [void][NetKnife.Native]::SetCurrentProcessExplicitAppUserModelID("Max.NetKnife") }
 
@@ -235,17 +239,18 @@ $Win.Add_PreviewKeyDown({
 
 # ---------------------------------------------------------------- theme switch
 
+# footer button: pick a theme from the full list (same as Settings)
 $Ui.ThemeBtn.Add_Click({
-    $Next = switch ($script:Settings.Theme) { "system" { "dark" } "dark" { "glass" } "glass" { "light" } default { "system" } }
-    $script:Settings.Theme = $Next
-    Save-Settings
-    $script:ReallyExit = $true
-    $Vbs = Join-Path $PSScriptRoot "launch.vbs"
-    if (Test-Path $Vbs) { Start-Process "$env:WINDIR\System32\wscript.exe" -ArgumentList (Quote-Arg $Vbs) }
-    else { Start-Process -FilePath $script:Pwsh -ArgumentList "-NoProfile -STA -ExecutionPolicy Bypass -File $(Quote-Arg (Join-Path $PSScriptRoot 'NetKnife.ps1'))" -WindowStyle Hidden }
-    $Win.Close()
+    param($S, $E)
+    $Items = foreach ($K in $script:Themes.Keys) {
+        $I = New-MenuItem $script:Themes[$K] $(if ($K -eq "$($script:Settings.Theme)") { 0xE73E } else { 0xE790 })
+        $I.Tag = $K
+        $I.Add_Click({ param($S2, $E2) if ("$($script:Settings.Theme)" -ne $S2.Tag) { $script:Settings.Theme = $S2.Tag; Save-Settings; Restart-App } })
+        $I
+    }
+    Show-Menu $S $Items
 })
-$Ui.ThemeBtn.ToolTip = "Тема: $(switch ($script:Settings.Theme) { 'dark' { 'тёмная' } 'glass' { 'стекло' } 'light' { 'светлая' } default { 'как в системе' } }) — клик переключает (система → тёмная → стекло → светлая)"
+$Ui.ThemeBtn.ToolTip = "Тема: $($script:Themes["$($script:Settings.Theme)"]) — клик открывает список"
 
 # ---------------------------------------------------------------- init
 
