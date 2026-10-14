@@ -48,7 +48,20 @@ function Test-SystemDark {
 }
 
 function Get-Palette {
-    param([bool]$Dark)
+    param([bool]$Dark, [switch]$Glass)
+
+    # "liquid glass": the window itself is transparent and Windows draws an acrylic blur behind it (Set-WindowChrome);
+    # surfaces are tinted glass over that. Dialogs get DialogBg (opaque) because they have no backdrop.
+    if ($Glass) {
+        return [ordered]@{
+            WindowBg = "#00000000"; Surface = "#5C14161C"; Card = "#5A262931"; CardHover = "#7A2C3039"
+            Selected = "#8027324A"; Line = "#2AFFFFFF"; Text = "#FFF2F4F8"; Sub = "#FFB4BCCA"; Faint = "#FF8A92A2"
+            Accent = "#FF6E9BFF"; AccentSoft = "#4D5B8CFF"; Chip = "#5A30343E"; CodeBg = "#9916181D"
+            Ok = "#FF4CC95E"; OkSoft = "#3A3FB950"; Fail = "#FFFF7B71"; FailSoft = "#3DF85149"
+            Warn = "#FFE8BD4F"; WarnSoft = "#3AE3B341"; HoverOverlay = "#18FFFFFF"; NavHover = "#18FFFFFF"; NavSel = "#2AFFFFFF"
+            DialogBg = "#FF1E2026"
+        }
+    }
 
     if ($Dark) {
         return [ordered]@{
@@ -57,10 +70,12 @@ function Get-Palette {
             Accent = "#FF5B8CFF"; AccentSoft = "#405B8CFF"; Chip = "#FF30343E"; CodeBg = "#FF16181D"
             Ok = "#FF3FB950"; OkSoft = "#2E3FB950"; Fail = "#FFFF6B61"; FailSoft = "#33F85149"
             Warn = "#FFE3B341"; WarnSoft = "#30E3B341"; HoverOverlay = "#14FFFFFF"; NavHover = "#14FFFFFF"; NavSel = "#22FFFFFF"
+            DialogBg = "#FF1E2026"
         }
     }
 
     return [ordered]@{
+        DialogBg = "#FFFBFBFD"
         WindowBg = "#FFF3F4F7"; Surface = "#F5FBFBFD"; Card = "#FFFFFFFF"; CardHover = "#FFF2F4F8"
         Selected = "#FFE7EEFF"; Line = "#FFE1E5EC"; Text = "#FF1B1F27"; Sub = "#FF586172"; Faint = "#FF8B94A3"
         Accent = "#FF2F6BFF"; AccentSoft = "#302F6BFF"; Chip = "#FFEEF1F6"; CodeBg = "#FFF3F5F9"
@@ -196,7 +211,8 @@ function Set-WindowChrome {
     [void][NetKnife.Native]::DwmSetWindowAttribute($Hwnd, 20, [ref]$Dark, 4)
 
     if ($Mica) {
-        $Backdrop = 2   # DWMSBT_MAINWINDOW (Mica)
+        # DWMSBT_MAINWINDOW (2) = Mica; DWMSBT_TRANSIENTWINDOW (3) = Acrylic blur — the "liquid glass" look
+        $Backdrop = $(if ($script:IsGlass) { 3 } else { 2 })
         $R = [NetKnife.Native]::DwmSetWindowAttribute($Hwnd, 38, [ref]$Backdrop, 4)
         if ($R -eq 0) {
             $M = New-Object NetKnife.Native+Margins
@@ -329,7 +345,7 @@ function New-Dialog {
 "@
     $D = [System.Windows.Markup.XamlReader]::Parse((Expand-ThemeXaml $Xaml))
     $D.Owner = $script:Win
-    $D.Background = $D.FindResource("Surface")
+    $D.Background = ConvertTo-Brush $script:Palette["DialogBg"]   # dialogs have no acrylic backdrop → opaque
     $D.Foreground = $D.FindResource("Text")
     $D.Add_SourceInitialized({ param($S, $E) Set-WindowChrome $S $false })
     return $D

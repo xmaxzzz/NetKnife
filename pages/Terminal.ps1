@@ -114,6 +114,7 @@ function Set-TermHint {
 # 8-15 = bright variants. Presets list only the slots they change; the rest stays as in the current file.
 $script:TermPalettes = [ordered]@{
     "Тёмный (NetKnife)" = @{ 0 = "000c0c0c"; 7 = "00cccccc"; 8 = "00767676"; 15 = "00f2f2f2" }
+    "Под фон приложения" = @{ 0 = "0026201e"; 7 = "00d6d2cc"; 8 = "00858080"; 15 = "00f8f4f2" }   # = Surface #1E2026, terminal blends into the page
     "Чёрный"            = @{ 0 = "00000000"; 7 = "00c0c0c0"; 8 = "00808080"; 15 = "00ffffff" }
     "Dracula"           = @{ 0 = "00362a28"; 1 = "00f993bd"; 2 = "007bfa50"; 3 = "00fde98b"; 4 = "005555ff"; 5 = "00c679ff"; 6 = "008cfaf1"; 7 = "00f2f8f8"; 8 = "00a47262"; 9 = "00f993bd"; 10 = "007bfa50"; 11 = "00fde98b"; 12 = "005555ff"; 13 = "00c679ff"; 14 = "008cfaf1"; 15 = "00ffffff" }
     "Solarized Dark"    = @{ 0 = "00362b00"; 1 = "00d28b26"; 2 = "00009985"; 3 = "0098a12a"; 4 = "002f32dc"; 5 = "008236d3"; 6 = "000089b5"; 7 = "00969483"; 8 = "00756e58"; 9 = "00d28b26"; 10 = "00009985"; 11 = "0098a12a"; 12 = "002f32dc"; 13 = "008236d3"; 14 = "000089b5"; 15 = "00e3f6fd" }
@@ -201,12 +202,26 @@ function Get-TerminalSub {
     return "Консоль PowerShell или SSH прямо в окне (ConEmu)"
 }
 
+# GuiMacro into the running ConEmu (tabs live inside one instance). Falls back to a fresh session.
+function Open-TermTab {
+    param([string]$Exe, [string]$ExeArgs, [string]$Label)
+    if (-not ($script:TermProc -and -not $script:TermProc.HasExited)) { New-TermSession "$Exe $ExeArgs".Trim() $Label; return }
+    $C = Join-Path $script:ConEmuDir "ConEmu\ConEmuC64.exe"
+    if (-not (Test-Path $C)) { $C = Join-Path $script:ConEmuDir "ConEmu\ConEmuC.exe" }
+    $Macro = "Shell(`"new_console`", `"$Exe`", `"$ExeArgs`")"
+    $Psi = New-Object System.Diagnostics.ProcessStartInfo $C
+    $Psi.Arguments = "-GuiMacro:$($script:TermProc.Id) $Macro"
+    $Psi.UseShellExecute = $false; $Psi.CreateNoWindow = $true
+    try { [void][System.Diagnostics.Process]::Start($Psi) } catch { New-TermSession "$Exe $ExeArgs".Trim() $Label }
+    $Ui.TermStatus.Text = "+ $Label"
+}
+
 function Show-TermSshMenu {
     param($Target)
     $Items = foreach ($H in ($script:Hosts | Sort-Object Alias)) {
         $I = New-MenuItem "$($H.Alias)   $($H.HostName)" 0xE977
         $I.Tag = $H.Alias
-        $I.Add_Click({ param($S, $E) New-TermSession "ssh.exe $($S.Tag)" "ssh $($S.Tag)" })
+        $I.Add_Click({ param($S, $E) Open-TermTab "ssh.exe" "$($S.Tag)" "ssh $($S.Tag)" })
         $I
     }
     if ($Items) { Show-Menu $Target $Items }
@@ -228,7 +243,8 @@ function Show-TerminalPage {
 
 function Initialize-TerminalPage {
     $Ui.TermPwsh.Add_Click({ New-TermSession "pwsh.exe -NoLogo" "PowerShell" })
-    $Ui.TermCmd.Add_Click({ New-TermSession "cmd.exe" "cmd" })
+    $Ui.TermCmd.Add_Click({ Open-TermTab "cmd.exe" "" "cmd" })
+    $Ui.TermNewTab.Add_Click({ Open-TermTab "pwsh.exe" "-NoLogo" "PowerShell" })
     $Ui.TermRestart.Add_Click({ New-TermSession "pwsh.exe -NoLogo" "PowerShell" })
     $Ui.TermSsh.Add_Click({ param($S, $E) Show-TermSshMenu $S })
     $Ui.TermExternal.Add_Click({ Start-Terminal "" "" })

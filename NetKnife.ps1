@@ -41,8 +41,9 @@ function Write-AppLog {
 # ---------------------------------------------------------------- theme + window
 
 $script:Settings = Get-Settings
-$script:IsDark = switch ($script:Settings.Theme) { "dark" { $true } "light" { $false } default { Test-SystemDark } }
-$script:Palette = Get-Palette $script:IsDark
+$script:IsGlass = ("$($script:Settings.Theme)" -eq "glass") -and ([Environment]::OSVersion.Version.Build -ge 22621)
+$script:IsDark = switch ($script:Settings.Theme) { "dark" { $true } "glass" { $true } "light" { $false } default { Test-SystemDark } }
+$script:Palette = Get-Palette $script:IsDark -Glass:$script:IsGlass
 
 if ($script:NativeOk) { [void][NetKnife.Native]::SetCurrentProcessExplicitAppUserModelID("Max.NetKnife") }
 
@@ -235,7 +236,7 @@ $Win.Add_PreviewKeyDown({
 # ---------------------------------------------------------------- theme switch
 
 $Ui.ThemeBtn.Add_Click({
-    $Next = switch ($script:Settings.Theme) { "system" { "dark" } "dark" { "light" } default { "system" } }
+    $Next = switch ($script:Settings.Theme) { "system" { "dark" } "dark" { "glass" } "glass" { "light" } default { "system" } }
     $script:Settings.Theme = $Next
     Save-Settings
     $script:ReallyExit = $true
@@ -244,7 +245,7 @@ $Ui.ThemeBtn.Add_Click({
     else { Start-Process -FilePath $script:Pwsh -ArgumentList "-NoProfile -STA -ExecutionPolicy Bypass -File $(Quote-Arg (Join-Path $PSScriptRoot 'NetKnife.ps1'))" -WindowStyle Hidden }
     $Win.Close()
 })
-$Ui.ThemeBtn.ToolTip = "Тема: $(switch ($script:Settings.Theme) { 'dark' { 'тёмная' } 'light' { 'светлая' } default { 'как в системе' } }) — клик переключает"
+$Ui.ThemeBtn.ToolTip = "Тема: $(switch ($script:Settings.Theme) { 'dark' { 'тёмная' } 'glass' { 'стекло' } 'light' { 'светлая' } default { 'как в системе' } }) — клик переключает (система → тёмная → стекло → светлая)"
 
 # ---------------------------------------------------------------- init
 

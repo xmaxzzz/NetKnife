@@ -652,8 +652,11 @@
                                 <Button x:Name="TermCmd" Style="{StaticResource Btn}" Padding="12,7" Margin="8,0,0,0">
                                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE756;" Style="{StaticResource Glyph}"/><TextBlock Text="cmd"/></StackPanel>
                                 </Button>
-                                <Button x:Name="TermSsh" Style="{StaticResource Btn}" Padding="12,7" Margin="8,0,0,0">
+                                <Button x:Name="TermSsh" Style="{StaticResource Btn}" Padding="12,7" Margin="8,0,0,0" ToolTip="Открывается новой вкладкой ConEmu">
                                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE977;" Style="{StaticResource Glyph}"/><TextBlock Text="SSH к хосту"/><TextBlock Text="&#xE70D;" Style="{StaticResource Glyph}" FontSize="9" Margin="6,1,0,0"/></StackPanel>
+                                </Button>
+                                <Button x:Name="TermNewTab" Style="{StaticResource Btn}" Padding="12,7" Margin="8,0,0,0" ToolTip="Новая вкладка PowerShell (Ctrl+T внутри ConEmu тоже работает; вкладки видны, когда их больше одной)">
+                                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE710;" Style="{StaticResource Glyph}"/><TextBlock Text="Вкладка"/></StackPanel>
                                 </Button>
                                 <Button x:Name="TermRestart" Style="{StaticResource Btn}" Padding="12,7" Margin="8,0,0,0" ToolTip="Перезапустить сессию">
                                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" Style="{StaticResource Glyph}"/><TextBlock Text="Перезапустить"/></StackPanel>
