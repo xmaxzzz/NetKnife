@@ -55,6 +55,7 @@ $script:Themes = [ordered]@{
     "midnight"      = "Полночь (чёрная)"
     "glass"         = "Стекло"
     "glass-dark"    = "Стекло · темнее"
+    "glass-black"   = "Стекло · почти чёрное"
     "glass-blue"    = "Стекло · синее"
     "glass-purple"  = "Стекло · фиолетовое"
     "glass-emerald" = "Стекло · изумруд"
@@ -68,15 +69,16 @@ function Get-Palette {
     # surfaces are tinted glass over that. DialogBg is opaque (dialogs have no backdrop); TermBg is the opaque
     # colour the embedded terminal paints so it blends with the page.
     if ($Name -like "glass*") {
-        # glass-dark: denser tint (less desktop bleeding through), darker cards
-        $Tint = switch ($Name) { "glass-dark" { "#A60B0C10" } "glass-blue" { "#5C0F1830" } "glass-purple" { "#5C1A1230" } "glass-emerald" { "#5C0E201C" } default { "#5C14161C" } }
+        # glass-dark / glass-black: denser tint (less desktop bleeding through), darker sidebar and cards
+        $Tint = switch ($Name) { "glass-dark" { "#A60B0C10" } "glass-black" { "#D9050507" } "glass-blue" { "#5C0F1830" } "glass-purple" { "#5C1A1230" } "glass-emerald" { "#5C0E201C" } default { "#5C14161C" } }
+        $Side = switch ($Name) { "glass-dark" { "#8C07080B" } "glass-black" { "#CC030304" } "glass-blue" { "#3A0A1020" } "glass-purple" { "#3A120C20" } "glass-emerald" { "#3A081612" } default { "#3A0E0F14" } }
         $Acc  = switch ($Name) { "glass-purple" { "#FFA78BFA" } "glass-emerald" { "#FF34D399" } default { "#FF6E9BFF" } }
         $AccS = switch ($Name) { "glass-purple" { "#4DA78BFA" } "glass-emerald" { "#4D34D399" } default { "#4D5B8CFF" } }
-        $Term = switch ($Name) { "glass-dark" { "#FF0E0F13" } "glass-blue" { "#FF151B2A" } "glass-purple" { "#FF1B1626" } "glass-emerald" { "#FF13201C" } default { "#FF1A1C22" } }
-        $Card = $(if ($Name -eq "glass-dark") { "#8C1A1C22" } else { "#5A262931" })
-        $CardH = $(if ($Name -eq "glass-dark") { "#A6222530" } else { "#7A2C3039" })
+        $Term = switch ($Name) { "glass-dark" { "#FF0E0F13" } "glass-black" { "#FF07070A" } "glass-blue" { "#FF151B2A" } "glass-purple" { "#FF1B1626" } "glass-emerald" { "#FF13201C" } default { "#FF1A1C22" } }
+        $Card = switch ($Name) { "glass-dark" { "#8C1A1C22" } "glass-black" { "#B3111217" } default { "#5A262931" } }
+        $CardH = switch ($Name) { "glass-dark" { "#A6222530" } "glass-black" { "#CC1A1B22" } default { "#7A2C3039" } }
         return [ordered]@{
-            WindowBg = "#00000000"; Surface = $Tint; Card = $Card; CardHover = $CardH
+            WindowBg = "#00000000"; SidebarBg = $Side; Surface = $Tint; Card = $Card; CardHover = $CardH
             Selected = "#8027324A"; Line = "#2AFFFFFF"; Text = "#FFF2F4F8"; Sub = "#FFB4BCCA"; Faint = "#FF8A92A2"
             Accent = $Acc; AccentSoft = $AccS; Chip = "#5A30343E"; CodeBg = "#9916181D"
             Ok = "#FF4CC95E"; OkSoft = "#3A3FB950"; Fail = "#FFFF7B71"; FailSoft = "#3DF85149"
@@ -87,7 +89,7 @@ function Get-Palette {
 
     if ($Name -eq "midnight") {
         return [ordered]@{
-            WindowBg = "#FF000000"; Surface = "#FF0A0A0C"; Card = "#FF141418"; CardHover = "#FF1C1C22"
+            WindowBg = "#FF000000"; SidebarBg = "#FF000000"; Surface = "#FF0A0A0C"; Card = "#FF141418"; CardHover = "#FF1C1C22"
             Selected = "#FF1B2438"; Line = "#FF222228"; Text = "#FFEDEEF2"; Sub = "#FF9DA4B2"; Faint = "#FF666C78"
             Accent = "#FF5B8CFF"; AccentSoft = "#405B8CFF"; Chip = "#FF1E1E24"; CodeBg = "#FF070708"
             Ok = "#FF3FB950"; OkSoft = "#2E3FB950"; Fail = "#FFFF6B61"; FailSoft = "#33F85149"
@@ -98,7 +100,7 @@ function Get-Palette {
 
     if ($Name -eq "dark-blue") {
         return [ordered]@{
-            WindowBg = "#FF151A26"; Surface = "#F2191F2E"; Card = "#FF222A3C"; CardHover = "#FF283145"
+            WindowBg = "#FF151A26"; SidebarBg = "#FF151A26"; Surface = "#F2191F2E"; Card = "#FF222A3C"; CardHover = "#FF283145"
             Selected = "#FF263556"; Line = "#FF30394E"; Text = "#FFECEFF6"; Sub = "#FFA6AFC4"; Faint = "#FF6F788E"
             Accent = "#FF6E9BFF"; AccentSoft = "#405B8CFF"; Chip = "#FF2C3448"; CodeBg = "#FF121724"
             Ok = "#FF3FB950"; OkSoft = "#2E3FB950"; Fail = "#FFFF6B61"; FailSoft = "#33F85149"
@@ -109,7 +111,7 @@ function Get-Palette {
 
     if ($Name -ne "light") {
         return [ordered]@{
-            WindowBg = "#FF1A1B20"; Surface = "#F21E2026"; Card = "#FF262931"; CardHover = "#FF2C3039"
+            WindowBg = "#FF1A1B20"; SidebarBg = "#FF1A1B20"; Surface = "#F21E2026"; Card = "#FF262931"; CardHover = "#FF2C3039"
             Selected = "#FF27324A"; Line = "#FF333743"; Text = "#FFECEEF3"; Sub = "#FFA3ABBA"; Faint = "#FF6E7685"
             Accent = "#FF5B8CFF"; AccentSoft = "#405B8CFF"; Chip = "#FF30343E"; CodeBg = "#FF16181D"
             Ok = "#FF3FB950"; OkSoft = "#2E3FB950"; Fail = "#FFFF6B61"; FailSoft = "#33F85149"
@@ -119,7 +121,7 @@ function Get-Palette {
     }
 
     return [ordered]@{
-        DialogBg = "#FFFBFBFD"; TermBg = "#FFFBFBFD"
+        DialogBg = "#FFFBFBFD"; TermBg = "#FFFBFBFD"; SidebarBg = "#FFF3F4F7"
         WindowBg = "#FFF3F4F7"; Surface = "#F5FBFBFD"; Card = "#FFFFFFFF"; CardHover = "#FFF2F4F8"
         Selected = "#FFE7EEFF"; Line = "#FFE1E5EC"; Text = "#FF1B1F27"; Sub = "#FF586172"; Faint = "#FF8B94A3"
         Accent = "#FF2F6BFF"; AccentSoft = "#302F6BFF"; Chip = "#FFEEF1F6"; CodeBg = "#FFF3F5F9"

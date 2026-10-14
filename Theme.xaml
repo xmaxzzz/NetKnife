@@ -1,5 +1,6 @@
 <!-- Theme resources. Tokens {{Name}} are replaced from the palette in NetKnife.ps1. -->
 <SolidColorBrush x:Key="WindowBg" Color="{{WindowBg}}"/>
+<SolidColorBrush x:Key="SidebarBg" Color="{{SidebarBg}}"/>
 <SolidColorBrush x:Key="Surface" Color="{{Surface}}"/>
 <SolidColorBrush x:Key="Card" Color="{{Card}}"/>
 <SolidColorBrush x:Key="CardHover" Color="{{CardHover}}"/>
