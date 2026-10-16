@@ -408,8 +408,7 @@
 
                 <!-- status strip -->
                 <DockPanel Margin="20,12,16,0" LastChildFill="False">
-                    <TextBox x:Name="QuickPing" DockPanel.Dock="Left" Style="{StaticResource Search}" Width="236" Height="34" Tag="Быстрый пинг: адрес и Enter"/>
-                    <Border x:Name="CpuPill" DockPanel.Dock="Left" Style="{StaticResource Pill}" Margin="8,0,0,0" ToolTip="Загрузка процессора">
+                    <Border x:Name="CpuPill" DockPanel.Dock="Left" Style="{StaticResource Pill}" Margin="0,0,0,0" ToolTip="Загрузка процессора">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock x:Name="CpuGlyph" Text="&#xE950;" Style="{StaticResource Glyph}" FontSize="12" Margin="0,0,6,0" Foreground="{StaticResource Sub}"/>
                             <TextBlock x:Name="CpuText" FontSize="12" Text="CPU —" FontFamily="{StaticResource MonoFont}" MinWidth="50"/>
@@ -1110,7 +1109,13 @@
                 </Grid>
 
                 <!-- toast -->
-                <Border x:Name="Toast" Grid.RowSpan="3" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,26"
+                <!-- quick ping: floating, bottom-right, above the pages (Ctrl+L) -->
+                <Border Grid.RowSpan="3" VerticalAlignment="Bottom" HorizontalAlignment="Right" Margin="0,0,18,14" CornerRadius="10" Background="{StaticResource Card}" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="4">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE9D9;" Style="{StaticResource Glyph}" FontSize="12" Foreground="{StaticResource Sub}" VerticalAlignment="Center" Margin="8,0,2,0"/>
+                        <TextBox x:Name="QuickPing" Style="{StaticResource Search}" Width="220" Height="30" Tag="Быстрый пинг: адрес и Enter"/>
+                    </StackPanel>
+                </Border>                <Border x:Name="Toast" Grid.RowSpan="3" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,26"
                         Background="{StaticResource Card}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="10" Padding="14,9" Opacity="0" IsHitTestVisible="False">
                     <Border.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="3" Opacity="0.35"/></Border.Effect>
                     <StackPanel Orientation="Horizontal">
