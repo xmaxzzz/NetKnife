@@ -8,6 +8,7 @@ $script:VpnPidFile = Join-Path $script:DataDir "vpn.pid"
 $script:VpnItems = New-Object System.Collections.ObjectModel.ObservableCollection[object]
 $script:Vpn = $null              # @{ P; Id; Started; Lines; ErrTask; Out; Error; Notified; Port }
 $script:VpnPumpSw = [System.Diagnostics.Stopwatch]::StartNew()
+$script:VpnWatchTick = 0
 $script:VpnPending = $null       # profile id to connect once sing-box is installed
 $script:VpnInstall = $null       # @{ Version; Url; Size } while a download is offered/running
 
@@ -172,10 +173,20 @@ function Set-SystemProxy {
         Set-ItemProperty $K ProxyOverride "<local>;localhost;127.*;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.2?.*;172.30.*;172.31.*;192.168.*;*.local"
         $script:Settings.VpnProxySet = $true
     } else {
+        # Restore. A backup that itself points at our proxy (left by a crashed run) is garbage — fall back to "off".
         $B = $script:Settings.VpnProxyBackup
-        Set-ItemProperty $K ProxyEnable $(if ($B -and $B.Enable) { 1 } else { 0 }) -Type DWord
-        if ($B -and $B.Server) { Set-ItemProperty $K ProxyServer $B.Server } else { Remove-ItemProperty $K ProxyServer -ErrorAction SilentlyContinue }
-        if ($B -and $B.Override) { Set-ItemProperty $K ProxyOverride $B.Override } else { Remove-ItemProperty $K ProxyOverride -ErrorAction SilentlyContinue }
+        if ($B -and (Test-ProxyIsOurs "$($B.Server)")) { $B = $null }
+        $WantEnable = $(if ($B -and $B.Enable -and $B.Server) { 1 } else { 0 })
+        foreach ($Try in 1..3) {
+            Set-ItemProperty $K ProxyEnable $WantEnable -Type DWord
+            if ($B -and $B.Server) { Set-ItemProperty $K ProxyServer $B.Server } else { Remove-ItemProperty $K ProxyServer -ErrorAction SilentlyContinue }
+            if ($B -and $B.Override) { Set-ItemProperty $K ProxyOverride $B.Override } else { Remove-ItemProperty $K ProxyOverride -ErrorAction SilentlyContinue }
+            $Cur = Get-ItemProperty $K -ErrorAction SilentlyContinue
+            $Ok = ([int]"0$($Cur.ProxyEnable)" -eq $WantEnable) -and -not (Test-ProxyIsOurs "$($Cur.ProxyServer)")
+            if ($Ok) { break }
+            Write-AppLog "vpn: proxy restore readback mismatch (try $Try): enable=$($Cur.ProxyEnable) server=$($Cur.ProxyServer)"
+            Start-Sleep -Milliseconds 150
+        }
         $script:Settings.VpnProxySet = $false
         $script:Settings.VpnProxyBackup = $null
     }
@@ -183,6 +194,36 @@ function Set-SystemProxy {
     # tell WinINET (browsers, .NET) the settings changed
     [void][NetKnife.WinInet]::InternetSetOption([IntPtr]::Zero, 39, [IntPtr]::Zero, 0)   # INTERNET_OPTION_SETTINGS_CHANGED
     [void][NetKnife.WinInet]::InternetSetOption([IntPtr]::Zero, 37, [IntPtr]::Zero, 0)   # INTERNET_OPTION_REFRESH
+}
+
+# Our proxy = 127.0.0.1:<VpnPort> (any scheme prefix)
+function Test-ProxyIsOurs {
+    param([string]$Server)
+    if (-not $Server) { return $false }
+    return ($Server -match "(^|=|;)(https?=)?127\.0\.0\.1:$(Get-VpnPort)(;|$)")
+}
+
+# System proxy still pointing at us while no engine runs → switch it off. Safe to call any time.
+function Repair-SystemProxy {
+    param([string]$Reason = "")
+    try {
+        $Cur = Get-ItemProperty $script:ProxyKey -ErrorAction SilentlyContinue
+        if ($Cur -and [int]"0$($Cur.ProxyEnable)" -eq 1 -and (Test-ProxyIsOurs "$($Cur.ProxyServer)")) {
+            Write-AppLog "vpn: system proxy still ours ($Reason) — switching off"
+            Set-SystemProxy ""
+            return $true
+        }
+    } catch { Write-AppLog "vpn: Repair-SystemProxy: $_" }
+    return $false
+}
+
+# Engine processes started from our folder (also orphans from a crashed run): kill by command line
+function Stop-VpnEngineProcesses {
+    try {
+        $Mine = Get-CimInstance Win32_Process -Filter "Name = xray.exe OR Name = mihomo.exe OR Name = koala-mihomo.exe" -ErrorAction SilentlyContinue |
+            Where-Object { "$($_.CommandLine)" -like "*$($script:VpnDir)*" }
+        foreach ($P in $Mine) { try { Stop-Process -Id $P.ProcessId -Force -ErrorAction Stop; Write-AppLog "vpn: killed engine pid $($P.ProcessId)" } catch { } }
+    } catch { }
 }
 
 # ---------------------------------------------------------------- engines
@@ -479,6 +520,7 @@ function Remove-StaleVpn {
         Write-AppLog "vpn: system proxy was left on — restoring"
         try { Set-SystemProxy "" } catch { }
     }
+    [void](Repair-SystemProxy "startup")
 }
 
 function Start-Vpn {
@@ -670,11 +712,14 @@ function Stop-Vpn {
     param([switch]$Quiet)
     $Name = ""
     if ($script:Vpn) { $Pf = @(Get-VpnProfiles) | Where-Object { $_.Id -eq $script:Vpn.Id } | Select-Object -First 1; if ($Pf) { $Name = $Pf.Name } }
-    if ($script:Vpn -and $script:Vpn.P -and -not $script:Vpn.P.HasExited) { try { $script:Vpn.P.Kill($true) } catch { } }
+    if ($script:Vpn -and $script:Vpn.P -and -not $script:Vpn.P.HasExited) { try { $script:Vpn.P.Kill($true); [void]$script:Vpn.P.WaitForExit(3000) } catch { } }
     $script:Vpn = $null
     Stop-VpnStats
     Save-VpnPid
-    if ($script:Settings.VpnProxySet) { try { Set-SystemProxy "" } catch { Write-AppLog "vpn: proxy restore failed: $_" } }
+    Stop-VpnEngineProcesses
+    # unconditional: the VpnProxySet flag can be clobbered by a second NetKnife instance saving settings
+    try { Set-SystemProxy "" } catch { Write-AppLog "vpn: proxy restore failed: $_" }
+    [void](Repair-SystemProxy "after stop")
     if (-not $Quiet) { Show-Toast "VPN отключён$(if ($Name) { ": $Name" })" "info"; $script:VpnIpTimer.Stop(); $script:VpnIpTimer.Start() }
     if ($Ui) { Refresh-Vpn }
 }
@@ -684,7 +729,12 @@ function Invoke-VpnPump {
     if ($script:VpnPumpSw.ElapsedMilliseconds -lt 1000) { return }
     $script:VpnPumpSw.Restart()
     $S = $script:Vpn
-    if (-not $S -or -not $S.P) { return }
+    if (-not $S -or -not $S.P) {
+        # watchdog: nothing running, but the system proxy still points at us (killed app, second instance, ...)
+        $script:VpnWatchTick = ($script:VpnWatchTick + 1) % 10
+        if ($script:VpnWatchTick -eq 0 -and (Repair-SystemProxy "watchdog")) { Show-Toast "Системный прокси указывал на выключенный VPN — отключил" "warn"; Refresh-Vpn }
+        return
+    }
 
     $Changed = $false
     foreach ($Key in @("OutTask", "ErrTask")) {
@@ -708,7 +758,7 @@ function Invoke-VpnPump {
         $Last = @($S.Lines | Where-Object { $_ -match 'level=(error|fatal)|FATAL|ERROR|\[Error\]|failed to' } | Select-Object -Last 1)
         $Err = if ($Last) { $Last[0] -replace '^.*msg="?', '' -replace '"$', '' -replace '^\S+ \S+ \[\w+\] ', '' } elseif ($S.Lines.Count) { $S.Lines[$S.Lines.Count - 1] } else { "$($S.Engine) завершился, код $($S.P.ExitCode)" }
         $S.Error = $Err
-        if ($script:Settings.VpnProxySet) { try { Set-SystemProxy "" } catch { } }
+        try { Set-SystemProxy "" } catch { }
         Save-VpnPid
         Show-Toast "VPN упал: $Err" "fail"
         Refresh-Vpn
