@@ -220,7 +220,7 @@ function Repair-SystemProxy {
 # Engine processes started from our folder (also orphans from a crashed run): kill by command line
 function Stop-VpnEngineProcesses {
     try {
-        $Mine = Get-CimInstance Win32_Process -Filter "Name = xray.exe OR Name = mihomo.exe OR Name = koala-mihomo.exe" -ErrorAction SilentlyContinue |
+        $Mine = Get-CimInstance Win32_Process -Filter "Name = 'xray.exe' OR Name = 'mihomo.exe' OR Name = 'koala-mihomo.exe'" -ErrorAction SilentlyContinue |
             Where-Object { "$($_.CommandLine)" -like "*$($script:VpnDir)*" }
         foreach ($P in $Mine) { try { Stop-Process -Id $P.ProcessId -Force -ErrorAction Stop; Write-AppLog "vpn: killed engine pid $($P.ProcessId)" } catch { } }
     } catch { }
