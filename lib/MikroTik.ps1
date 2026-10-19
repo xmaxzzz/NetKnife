@@ -333,15 +333,20 @@ function Show-MtConnectDialog {
         $S.Foreground = Get-Brush $(switch ($Kind) { "ok" { "Ok" } "fail" { "Fail" } "wait" { "Warn" } default { "Sub" } })
     }
     $script:MtConn.SetSt = $SetSt
-    $F.FOk.Add_Click({
+    # login check as butler-service; $Auto = silent first try when the card opens (the account may already exist on
+    # the router — created by the helpdesk or another laptop — and already trust this key)
+    $script:MtConn.Check = {
+        param([bool]$Auto)
         $C = $script:MtConn
-        if (-not $C.F.FName.Text.Trim() -or -not $C.F.FHost.Text.Trim()) { & $C.SetSt "Объект и адрес обязательны" "fail"; return }
-        if ($C.F.FPort.Text.Trim() -notmatch '^\d+$') { & $C.SetSt "Порт — число" "fail"; return }
+        if (-not $C.F.FName.Text.Trim() -or -not $C.F.FHost.Text.Trim()) { if (-not $Auto) { & $C.SetSt "Объект и адрес обязательны" "fail" }; return }
+        if ($C.F.FPort.Text.Trim() -notmatch '^\d+$') { if (-not $Auto) { & $C.SetSt "Порт — число" "fail" }; return }
         $Old = $C.R
+        # the account password belongs to the helpdesk (API logins); NetKnife works by key only and never stores it
         $C.Router = @{ Id = $(if ($Old -and $Old.Id) { $Old.Id } else { [guid]::NewGuid().ToString("N").Substring(0, 8) }); Name = $C.F.FName.Text.Trim(); Host = (Repair-TargetText $C.F.FHost); Port = [int]$C.F.FPort.Text.Trim()
-            Admin = $(if ($Old) { "$($Old.Admin)" } else { "" }); AdminKey = $(if ($Old) { "$($Old.AdminKey)" } else { "" }); Ready = $true; PassEnc = (Protect-MtSecret $C.Pw) }
+            Admin = $(if ($Old) { "$($Old.Admin)" } else { "" }); AdminKey = $(if ($Old) { "$($Old.AdminKey)" } else { "" }); Ready = $true; PassEnc = "" }
+        $C.Auto = $Auto
         $C.F.FOk.IsEnabled = $false
-        & $C.SetSt "Вхожу на $($C.Router.Host):$($C.Router.Port) как butler-service…" "wait"
+        & $C.SetSt $(if ($Auto) { "Проверяю, есть ли уже на роутере пользователь butler-service с ключом этого ноутбука…" } else { "Вхожу на $($C.Router.Host):$($C.Router.Port) как butler-service…" }) "wait"
         Invoke-MtAsync $C.Router ':put ("##J" . [:serialize to=json ({"ver"=[/system resource get version]; "id"=[/system identity get name]; "board"=[/system resource get board-name]})])' -Name "mt-conn" -TimeoutMs 15000 -OnResult {
             param($M)
             $C = $script:MtConn
@@ -349,6 +354,7 @@ function Show-MtConnectDialog {
             $C.F.FOk.IsEnabled = $true
             if ($M.Code -ne 0) {
                 $E = "$($M.Err)"
+                if ($E -match 'Permission denied' -and $C.Auto) { & $C.SetSt "Доступа пока нет — выполни команды ниже в терминале роутера. Они сами проверяют пользователя: создадут butler-service, только если его нет, и добавят ключ этого ноутбука." "sub"; return }
                 $Why = $(if ($E -match 'Permission denied') { "вход как butler-service не принят: команды не выполнены или выполнены не полностью — в терминале должна появиться строка NETKNIFE-OK. Если вставлял частями — вставь заново целиком." }
                     elseif ($E -match 'refused') { "порт $($C.Router.Port) закрыт — проверь SSH-порт (IP → Services → ssh)" }
                     elseif ($E -match 'timed out|No route|Could not resolve') { "роутер недоступен: $E" }
@@ -357,12 +363,16 @@ function Show-MtConnectDialog {
             }
             $J = ConvertFrom-MtJson $M.Out "##J"
             if (-not $J) { & $C.SetSt "Вход есть, но ответ не разобран — нужен RouterOS 7.13+ (:serialize)" "fail"; return }
-            $C.Info = "$($J.id) · $($J.board) · RouterOS $($J.ver)"
+            $C.Info = "$($J.id) · $($J.board) · RouterOS $($J.ver)$(if ($C.Auto) { ' · butler-service уже был' })"
             $C.Done = $true
             $C.D.DialogResult = $true
         }
+    }
+    $F.FOk.Add_Click({ & $script:MtConn.Check $false })
+    $D.Add_ContentRendered({
+        if (-not $script:MtConn.F.FName.Text) { [void]$script:MtConn.F.FName.Focus() }
+        if ($script:MtConn.F.FHost.Text.Trim()) { & $script:MtConn.Check $true }
     })
-    $D.Add_ContentRendered({ if (-not $script:MtConn.F.FName.Text) { [void]$script:MtConn.F.FName.Focus() } })
     [void]$D.ShowDialog()
     Stop-Worker "mt-conn"
     $C = $script:MtConn; $script:MtConn = $null
