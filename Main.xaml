@@ -330,6 +330,35 @@
             </DataTemplate.Triggers>
         </DataTemplate>
 
+        <DataTemplate x:Key="WpPointRowT">
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Room}" FontSize="13.5" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Text="{Binding Best}" Style="{StaticResource SubText}" FontFamily="{StaticResource MonoFont}" FontSize="11.5" Margin="0,1,0,0"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="10,0,0,0">
+                    <TextBlock Text="{Binding Time}" FontSize="11.5" Foreground="{StaticResource Faint}" HorizontalAlignment="Right"/>
+                    <TextBlock Text="{Binding Meta}" FontSize="11.5" Foreground="{StaticResource Faint}" HorizontalAlignment="Right"/>
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
+        <DataTemplate x:Key="WpApRowT">
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <TextBlock x:Name="G" Text="&#xE701;" FontFamily="{StaticResource IconFont}" FontSize="15" Foreground="{StaticResource Accent}" VerticalAlignment="Center"/>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock x:Name="N" Text="{Binding Name}" FontSize="13.5" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Text="{Binding Tx}" Style="{StaticResource SubText}" FontSize="11.5" Margin="0,1,0,0"/>
+                    <TextBlock Text="{Binding Meta}" FontFamily="{StaticResource MonoFont}" FontSize="10.5" Foreground="{StaticResource Faint}"/>
+                </StackPanel>
+            </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Named}" Value="False"><Setter TargetName="N" Property="Foreground" Value="{StaticResource Warn}"/></DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
         <DataTemplate x:Key="DnsRowT">
             <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="4"/><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
@@ -393,6 +422,9 @@
                 </RadioButton>
                 <RadioButton x:Name="NavWifi" Style="{StaticResource Nav}">
                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE701;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Wi-Fi"/></StackPanel>
+                </RadioButton>
+                <RadioButton x:Name="NavWplan" Style="{StaticResource Nav}">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE707;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Wi-Fi план"/></StackPanel>
                 </RadioButton>
                 <RadioButton x:Name="NavMonitor" Style="{StaticResource Nav}">
                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9D2;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Монитор"/></StackPanel>
@@ -762,6 +794,73 @@
                         </Border>
                         <ListView x:Name="ConnList" Style="{StaticResource List}" ItemTemplate="{StaticResource ConnRowT}" Margin="-10,8,0,0"/>
                     </DockPanel>
+
+                    <!-- WI-FI PLAN -->
+                    <Grid x:Name="PageWplan" Visibility="Collapsed" Margin="26,0,18,14">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="230"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                        <Border Style="{StaticResource CardBox}" Padding="16,14">
+                            <StackPanel>
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="260"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="ОБЪЕКТ" Style="{StaticResource Caption}"/>
+                                        <DockPanel>
+                                            <Button x:Name="WpSitePick" DockPanel.Dock="Right" Style="{StaticResource IconBtn}" Content="&#xE70D;" Width="30" Height="36" Margin="4,0,0,0" ToolTip="Сохранённые объекты"/>
+                                            <TextBox x:Name="WpSite" Style="{StaticResource Field}" Tag="Алые Паруса 115"/>
+                                        </DockPanel>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="SSID ОБЪЕКТА (через запятую; пусто — все точки TP-Link)" Style="{StaticResource Caption}"/>
+                                        <TextBox x:Name="WpSsids" Style="{StaticResource MonoField}" Tag="Home, Home_IoT"/>
+                                    </StackPanel>
+                                </Grid>
+                                <Grid Margin="0,12,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <TextBox x:Name="WpRoom" Style="{StaticResource Field}" Height="40" FontSize="14.5" Tag="где стоишь: Кухня, Спальня 2, Лестница 2 эт…  (Enter — замер)"/>
+                                    <Button x:Name="WpMeasure" Grid.Column="1" Style="{StaticResource AccentBtn}" Padding="18,9" Margin="10,0,0,0">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE707;" Style="{StaticResource Glyph}"/><TextBlock Text="Замер здесь"/></StackPanel>
+                                    </Button>
+                                </Grid>
+                                <TextBlock x:Name="WpStatus" Foreground="{StaticResource Sub}" FontSize="12" Margin="2,8,0,0" TextWrapping="Wrap" Text="Обойди объект: в каждом помещении (и на краях — лестница, балкон, дальний угол) встань там, где обычно пользуются Wi-Fi, и нажми «Замер здесь». Три прохода скана, берётся медиана."/>
+                            </StackPanel>
+                        </Border>
+                        <Grid Grid.Row="1" Margin="0,8,0,0">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Border Style="{StaticResource CardBox}" Padding="10,10" Margin="0">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Text="ЗАМЕРЫ  (ПКМ — удалить)" Style="{StaticResource Caption}" Margin="6,0,0,4"/>
+                                    <TextBlock x:Name="WpPointsEmpty" DockPanel.Dock="Top" Text="Пока нет замеров." Foreground="{StaticResource Faint}" Margin="6,4,0,0"/>
+                                    <ListView x:Name="WpPoints" Style="{StaticResource List}" ItemTemplate="{StaticResource WpPointRowT}"/>
+                                </DockPanel>
+                            </Border>
+                            <Border Grid.Column="2" Style="{StaticResource CardBox}" Padding="10,10" Margin="0">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Text="ТОЧКИ  (2×клик — имя как в Omada, текущая мощность, объединить)" Style="{StaticResource Caption}" Margin="6,0,0,4" TextTrimming="CharacterEllipsis"/>
+                                    <ListView x:Name="WpAps" Style="{StaticResource List}" ItemTemplate="{StaticResource WpApRowT}"/>
+                                </DockPanel>
+                            </Border>
+                        </Grid>
+                        <Border Grid.Row="2" Style="{StaticResource CardBox}" Padding="14,12" Margin="0,8,0,0">
+                            <DockPanel>
+                                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+                                    <Button x:Name="WpCalc" Style="{StaticResource AccentBtn}" Padding="14,7">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8EF;" Style="{StaticResource Glyph}"/><TextBlock Text="Рассчитать"/></StackPanel>
+                                    </Button>
+                                    <Button x:Name="WpCopySheet" Style="{StaticResource Btn}" Padding="12,7" Margin="8,0,0,0" ToolTip="Таблица точка → диапазон → канал → ширина → мощность (вставляется в Excel)">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8A5;" Style="{StaticResource Glyph}"/><TextBlock Text="Лист для Omada"/></StackPanel>
+                                    </Button>
+                                    <Button x:Name="WpCopy" Style="{StaticResource Btn}" Padding="12,7" Margin="8,0,0,0">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8C8;" Style="{StaticResource Glyph}"/><TextBlock Text="Копировать отчёт"/></StackPanel>
+                                    </Button>
+                                    <Button x:Name="WpAi" Style="{StaticResource Btn}" Padding="12,7" Margin="8,0,0,0" ToolTip="Отправить замеры и расчёт в Claude (твой API-ключ) за проверкой и советом">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE99A;" Style="{StaticResource Glyph}"/><TextBlock Text="Совет ИИ"/></StackPanel>
+                                    </Button>
+                                    <CheckBox x:Name="WpDfs" Style="{StaticResource Switch}" Content="DFS-каналы 5 ГГц" Margin="16,0,0,0" VerticalAlignment="Center" ToolTip="52–144: больше чистых каналов, но точка уходит с канала при радаре (пауза ~1 мин)"/>
+                                </StackPanel>
+                                <TextBox x:Name="WpReport" Style="{StaticResource Code}" FontSize="12" TextWrapping="NoWrap" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Text=""/>
+                            </DockPanel>
+                        </Border>
+                    </Grid>
 
                     <!-- SETTINGS -->
                     <ScrollViewer x:Name="PageSettings" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" Padding="26,0,18,16">

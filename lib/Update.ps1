@@ -34,25 +34,25 @@ function Start-UpdateCheck {
     param([switch]$Manual)
     if (Test-WorkerRunning "upd-check") { return }
     if ($Manual) { Set-UpdateStatus "Проверяю GitHub…" }
-    [void](Start-Worker -Name "upd-check" -Body $script:UpdateCheckBody -ArgList @($script:UpdateRepo) -OnMessage {
+    [void](Start-Worker -Name "upd-check" -Body $script:UpdateCheckBody -ArgList @($script:UpdateRepo) -State @{ Manual = [bool]$Manual } -OnMessage {
         param($M)
         if ($M.Type -ne "upd") { return }
         if ($M.Error) {
             Write-AppLog "update check: $($M.Error)"
-            if ($Manual) { Set-UpdateStatus "Не удалось проверить: $($M.Error)" }
+            if ($State.Manual) { Set-UpdateStatus "Не удалось проверить: $($M.Error)" }
             return
         }
         $Remote = ConvertTo-AppVersion $M.Tag
         $Local = ConvertTo-AppVersion $script:AppVersion
         if ($Remote -gt $Local) {
             $script:UpdateAvail = @{ Tag = $M.Tag; Url = $M.Url; Size = $M.Size; Notes = $M.Notes }
-            Set-UpdateStatus "Доступна версия $($M.Tag) ({0:N1} МБ)" -f ($M.Size / 1MB)
+            Set-UpdateStatus ("Доступна версия $($M.Tag) ({0:N1} МБ)" -f ($M.Size / 1MB))
             if ($Ui.SetUpdApply) { $Ui.SetUpdApply.Visibility = "Visible" }
             Show-Toast "Доступно обновление NetKnife $($M.Tag) — Настройки → Обновить" "info"
         } else {
             $script:UpdateAvail = $null
             if ($Ui.SetUpdApply) { $Ui.SetUpdApply.Visibility = "Collapsed" }
-            if ($Manual) { Set-UpdateStatus "Это последняя версия ($($M.Tag))" }
+            if ($State.Manual) { Set-UpdateStatus "Это последняя версия ($($M.Tag))" }
         }
     })
 }

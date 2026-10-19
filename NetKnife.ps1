@@ -31,6 +31,9 @@ function Write-AppLog {
 . (Join-Path $PSScriptRoot "pages\Tunnels.ps1")
 . (Join-Path $PSScriptRoot "pages\Vpn.ps1")
 . (Join-Path $PSScriptRoot "pages\Conns.ps1")
+. (Join-Path $PSScriptRoot "lib\WlanApi.ps1")
+. (Join-Path $PSScriptRoot "lib\Ai.ps1")
+. (Join-Path $PSScriptRoot "pages\WifiPlan.ps1")
 . (Join-Path $PSScriptRoot "pages\Monitor.ps1")
 . (Join-Path $PSScriptRoot "pages\Wifi.ps1")
 . (Join-Path $PSScriptRoot "pages\Terminal.ps1")
@@ -98,6 +101,7 @@ $script:Pages = [ordered]@{
     ping  = @{ Panel = "PagePing";  Nav = "NavPing";  Title = "Пинг и трассировка"; Sub = { Get-PingSub };  Focus = "PingTarget" }
     dns   = @{ Panel = "PageDns";   Nav = "NavDns";   Title = "DNS";                Sub = { Get-DnsSub };   Focus = "DnsName" }
     wifi  = @{ Panel = "PageWifi";  Nav = "NavWifi";  Title = "Wi-Fi";              Sub = { Get-WifiSub };  Focus = "WifiScan" }
+    wplan = @{ Panel = "PageWplan"; Nav = "NavWplan"; Title = "Wi-Fi план";         Sub = { Get-WplanSub }; Focus = "WpRoom" }
     monitor = @{ Panel = "PageMonitor"; Nav = "NavMonitor"; Title = "Монитор";      Sub = { Get-MonitorSub }; Focus = "MonTarget" }
     vpn   = @{ Panel = "PageVpn";   Nav = "NavVpn";   Title = "VPN";                Sub = { Get-VpnSub };   Focus = "VpnList" }
     conns = @{ Panel = "PageConns"; Nav = "NavConns"; Title = "Соединения программ"; Sub = { Get-ConnsSub }; Focus = "ConnProc" }
@@ -262,6 +266,7 @@ Initialize-HostsPage
 Initialize-TunnelsPage
 Initialize-VpnPage
 Initialize-ConnsPage
+Initialize-WifiPlanPage
 Initialize-TerminalPage
 Initialize-MonitorPage
 Initialize-WifiPage

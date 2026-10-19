@@ -1,4 +1,4 @@
-﻿# Background workers: thread jobs that talk to the UI through a concurrent queue.
+# Background workers: thread jobs that talk to the UI through a concurrent queue.
 # Worker body signature: param($Q, $Ctl, ...args). Enqueue hashtables with a Type key.
 
 $script:Workers = [System.Collections.Generic.List[object]]::new()
@@ -23,6 +23,7 @@ function Start-Worker {
         [object[]]$ArgList = @(),
         [scriptblock]$OnMessage,
         [scriptblock]$OnDone,
+        [hashtable]$State = @{},
         [switch]$Replace
     )
 
@@ -32,7 +33,7 @@ function Start-Worker {
     $Ctl = [hashtable]::Synchronized(@{ Stop = $false })
     $Job = Start-ThreadJob -ThrottleLimit 48 -ScriptBlock $script:WorkerWrapper -ArgumentList $script:NetLib, $Q, $Ctl, $Body.ToString(), $ArgList
 
-    $W = [pscustomobject]@{ Name = $Name; Q = $Q; Ctl = $Ctl; Job = $Job; OnMessage = $OnMessage; OnDone = $OnDone; Started = [DateTime]::Now }
+    $W = [pscustomobject]@{ Name = $Name; Q = $Q; Ctl = $Ctl; Job = $Job; OnMessage = $OnMessage; OnDone = $OnDone; State = $State; Started = [DateTime]::Now }
     $script:Workers.Add($W)
     return $W
 }
@@ -57,6 +58,8 @@ $script:Orphans = [System.Collections.Generic.List[object]]::new()
 
 function Invoke-WorkerPump {
     foreach ($W in @($script:Workers)) {
+        # handlers do not see the locals of the function that started the worker; pass them via -State
+        $State = $W.State
         $Msg = $null
         $N = 0
         $Ended = $false

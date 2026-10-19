@@ -74,13 +74,13 @@ function Start-AiRequest {
     $Key = Get-AiKey
     if (-not $Key) { Show-Toast "Нет ключа Claude API — задай в настройках ИИ" "warn"; Show-AiKeyDialog; $Key = Get-AiKey; if (-not $Key) { return $false } }
     $Model = if ($script:Settings.AiModel) { $script:Settings.AiModel } else { $script:AiModel }
-    [void](Start-Worker -Name $Name -Replace -Body $script:AiBody -ArgList @($Key, $Model, $System, $UserText, $MaxTokens) -OnMessage {
-        param($M)
-        if ($M.Type -ne "ai") { return }
-        & $script:AiCallbacks[$Name] $M
-    })
     if (-not $script:AiCallbacks) { $script:AiCallbacks = @{} }
     $script:AiCallbacks[$Name] = $OnResult
+    [void](Start-Worker -Name $Name -Replace -Body $script:AiBody -ArgList @($Key, $Model, $System, $UserText, $MaxTokens) -State @{ Name = $Name } -OnMessage {
+        param($M)
+        if ($M.Type -ne "ai") { return }
+        & $script:AiCallbacks[$State.Name] $M
+    })
     return $true
 }
 

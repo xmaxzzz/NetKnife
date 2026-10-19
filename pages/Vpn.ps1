@@ -466,8 +466,9 @@ function Start-VpnInstall {
     $E = $script:VpnEngines[$Engine]
     $Pat = if ("$env:PROCESSOR_ARCHITECTURE" -eq "ARM64") { $E.AssetArm } else { $E.Asset }
     Set-VpnBanner "wait" "Узнаю актуальную версию $($E.Title) на GitHub…"
-    [void](Start-Worker -Name "vpn-meta" -Body $script:VpnMetaBody -ArgList @($E.Repo, $Pat) -OnMessage {
+    [void](Start-Worker -Name "vpn-meta" -Body $script:VpnMetaBody -ArgList @($E.Repo, $Pat) -State @{ E = $E; Engine = $Engine } -OnMessage {
         param($M)
+        $E = $State.E; $Engine = $State.Engine
         if ($M.Type -ne "vpnmeta") { return }
         if ($M.Error) { Set-VpnBanner "fail" "$($E.Title) не скачать: $($M.Error)"; $script:VpnPending = $null; return }
         $script:VpnInstall = @{ Engine = $Engine; Version = $M.Version; Url = $M.Url; Size = $M.Size; Name = $M.Name }
@@ -476,8 +477,9 @@ function Start-VpnInstall {
         $Msg = "Движок VPN. Скачается официальный релиз $($E.Repo) $($M.Version) ($Mb) в $($script:VpnDir). Больше ничего не ставится и не меняется."
         if (-not (Show-Confirm "Скачать $($E.Title) $($M.Version)?" $Msg "Скачать" -Detail $M.Url)) { $script:VpnPending = $null; return }
         Set-VpnBanner "wait" "Скачиваю $($E.Title) $($M.Version) ($Mb)…"
-        [void](Start-Worker -Name "vpn-dl" -Body $script:VpnDownloadBody -ArgList @($M.Url, $script:VpnDir, $E.ExeMatch, $E.Exe) -OnMessage {
+        [void](Start-Worker -Name "vpn-dl" -Body $script:VpnDownloadBody -ArgList @($M.Url, $script:VpnDir, $E.ExeMatch, $E.Exe) -State @{ E = $E; Engine = $Engine } -OnMessage {
             param($M2)
+            $E = $State.E; $Engine = $State.Engine
             if ($M2.Type -ne "vpndl") { return }
             if ($M2.Error) { Set-VpnBanner "fail" "Загрузка не удалась: $($M2.Error)"; $script:VpnPending = $null; return }
             Set-VpnBanner "none" ""
@@ -598,21 +600,21 @@ $script:VpnProbeBody = {
 function Start-VpnProbe {
     param($Pf, [int]$Port)
     $Id = $Pf.Id
-    [void](Start-Worker -Name "vpn-probe" -Replace -Body $script:VpnProbeBody -ArgList @($Port) -OnMessage {
+    [void](Start-Worker -Name "vpn-probe" -Replace -Body $script:VpnProbeBody -ArgList @($Port) -State @{ Id = $Id; Pf = $Pf } -OnMessage {
         param($M)
         if ($M.Type -ne "vpnprobe") { return }
-        if (-not $script:Vpn -or $script:Vpn.Id -ne $Id -or -not (Test-VpnRunning)) { return }   # already stopped/switched
+        if (-not $script:Vpn -or $script:Vpn.Id -ne $State.Id -or -not (Test-VpnRunning)) { return }   # already stopped/switched
         if ($M.Ip) {
             $script:Vpn.Egress = $M.Ip
             Show-Toast "VPN работает · внешний IP $($M.Ip)" "ok"
-            Show-TrayBalloon "VPN подключён" "$($Pf.Name) · выход $($M.Ip)" "Info"
+            Show-TrayBalloon "VPN подключён" "$($State.Pf.Name) · выход $($M.Ip)" "Info"
             $script:VpnIpTimer.Stop(); $script:VpnIpTimer.Start()
         } else {
             $Tail = @($script:Vpn.Lines | Select-Object -Last 3) -join "`n"
             Stop-Vpn -Quiet
-            $script:Vpn = @{ P = $null; Id = $Id; Started = [DateTime]::Now; Error = "туннель не отвечает — прокси возвращён"; Notified = $true; Lines = [System.Collections.Generic.List[string]]::new() }
-            Show-Toast "VPN «$($Pf.Name)»: через туннель ничего не проходит — отключил, интернет как был" "fail"
-            Write-AppLog "vpn probe failed for $($Pf.Name): $($M.Error)`n$Tail"
+            $script:Vpn = @{ P = $null; Id = $State.Id; Started = [DateTime]::Now; Error = "туннель не отвечает — прокси возвращён"; Notified = $true; Lines = [System.Collections.Generic.List[string]]::new() }
+            Show-Toast "VPN «$($State.Pf.Name)»: через туннель ничего не проходит — отключил, интернет как был" "fail"
+            Write-AppLog "vpn probe failed for $($State.Pf.Name): $($M.Error)`n$Tail"
             Refresh-Vpn
         }
     })
