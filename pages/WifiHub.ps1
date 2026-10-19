@@ -96,18 +96,21 @@ function Set-WhStep {
             if ($W.RouterId -and $Ui.RoamRouter) { $Ui.RoamRouter.SelectedValue = $W.RouterId }
         }
         "survey" {
+            Set-WhPlanLayout "survey"
             $Ui.WpSeries.Text = $script:WplanBaseSeries
             $Ui.WhText.Text = "Замеры: в каждой комнате встань там, где обычно пользуются Wi-Fi, введи название и Enter. В дверях и коридорах между зонами точек — с галкой «Переход». Минимум по 2 места на точку, включая дальние углы."
         }
         "calc" {
+            Set-WhPlanLayout "calc"
             $Ui.WpSeries.Text = $script:WplanBaseSeries
             Use-WplanSite
             $Ui.WpReport.Text = Get-WplanReport
             $Ui.WhCalcExtra.Visibility = "Visible"
             $Ui.WhApplied.IsChecked = [bool]$W.Applied
-            $Ui.WhText.Text = "Внизу — прогноз и значения для каждой точки. «Лист для Omada» копирует таблицу (точка → канал → ширина → мощность). Внеси значения в Omada, затем отметь «Внёс в Omada» и нажми «Принять как текущие» — следующий расчёт будет от новых мощностей."
+            $Ui.WhText.Text = "Ниже — прогноз и значения для каждой точки (после правки поправки или потолков — «Рассчитать»). «Лист для Omada» копирует таблицу (точка → канал → ширина → мощность). Внеси значения в Omada, затем отметь «Внёс в Omada» и нажми «Принять как текущие» — следующий расчёт будет от новых мощностей."
         }
         "survey2" {
+            Set-WhPlanLayout "survey"
             if (-not $W.AfterSeries) {
                 $L = @(Get-WplanSeriesList); $K = 1; while ($L -contains "После правок $K") { $K++ }
                 $W.AfterSeries = "После правок $K"; Save-Wplan
@@ -123,6 +126,41 @@ function Set-WhStep {
     Show-WhPanel $S.Panel
     Update-WhStepper
     Update-PageSub
+}
+
+# The planner panel is shared by the survey and calc steps; each step shows only its part (site, SSID and series
+# are owned by the wizard: step 1 and the step itself).
+function Get-WhUp {
+    param($El, [type]$Type)
+    $P = $El.Parent
+    while ($P -and $P -isnot $Type) { $P = $P.Parent }
+    return $P
+}
+
+function Set-WhPlanLayout {
+    param([ValidateSet("survey", "calc")][string]$Mode)
+    $Calc = ($Mode -eq "calc")
+    $Vis = { param([bool]$On) if ($On) { "Visible" } else { "Collapsed" } }
+    (Get-WhUp $Ui.WpSite ([System.Windows.Controls.Grid])).Visibility = "Collapsed"
+    $Series = Get-WhUp $Ui.WpOffset ([System.Windows.Controls.Grid])
+    $Series.Visibility = & $Vis $Calc
+    $SBox = Get-WhUp $Ui.WpSeries ([System.Windows.Controls.StackPanel])
+    $SBox.Visibility = "Collapsed"
+    $Series.ColumnDefinitions[0].Width = New-Object System.Windows.GridLength 0
+    $Series.ColumnDefinitions[1].Width = New-Object System.Windows.GridLength 0
+    $Series.Margin = New-Object System.Windows.Thickness 0
+    $Ui.WpRoom.Parent.Visibility = & $Vis (-not $Calc)
+    $Ui.WpRoom.Parent.Margin = New-Object System.Windows.Thickness 0
+    $Ui.WpStatus.Visibility = & $Vis (-not $Calc)
+    $Lists = Get-WhUp $Ui.WpPoints ([System.Windows.Controls.Grid])
+    $Lists.Visibility = & $Vis (-not $Calc)
+    $Report = Get-WhUp $Ui.WpReport ([System.Windows.Controls.Border])
+    $Report.Visibility = & $Vis $Calc
+    # rows: lists take the free height while surveying, the report while calculating
+    $Ui.PageWplan.RowDefinitions[1].Height = $(if ($Calc) { New-Object System.Windows.GridLength 0 } else { New-Object System.Windows.GridLength 1, ([System.Windows.GridUnitType]::Star) })
+    $Ui.PageWplan.RowDefinitions[2].Height = $(if ($Calc) { New-Object System.Windows.GridLength 1, ([System.Windows.GridUnitType]::Star) } else { New-Object System.Windows.GridLength 0 })
+    # report toolbar: the sheet lives in the wizard bar, comparison and HTML — in the summary step
+    foreach ($B in @($Ui.WpCopySheet, $Ui.WpCompare, $Ui.WpHtml)) { $B.Visibility = "Collapsed" }
 }
 
 function Show-WhAir {
