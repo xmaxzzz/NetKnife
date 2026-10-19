@@ -429,9 +429,6 @@
             </StackPanel>
 
             <StackPanel DockPanel.Dock="Bottom">
-                <Button x:Name="NewServerBtn" Style="{StaticResource AccentBtn}" HorizontalContentAlignment="Left" Padding="14,9">
-                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE710;" Style="{StaticResource Glyph}"/><TextBlock Text="Новый сервер"/></StackPanel>
-                </Button>
                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0" HorizontalAlignment="Center">
                     <Button x:Name="ConfigBtn" Style="{StaticResource IconBtn}" Content="&#xE70F;" ToolTip="Открыть ~/.ssh/config"/>
                     <Button x:Name="SshDirBtn" Style="{StaticResource IconBtn}" Content="&#xE838;" ToolTip="Папка .ssh"/>
@@ -464,15 +461,8 @@
                 <RadioButton x:Name="NavConns" Style="{StaticResource Nav}">
                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8CE;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Соединения"/></StackPanel>
                 </RadioButton>
-                <TextBlock Text="WI-FI" Style="{StaticResource Caption}" Margin="12,16,0,4"/>
                 <RadioButton x:Name="NavWifi" Style="{StaticResource Nav}">
                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE701;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Wi-Fi"/></StackPanel>
-                </RadioButton>
-                <RadioButton x:Name="NavWplan" Style="{StaticResource Nav}">
-                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE707;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Wi-Fi план"/></StackPanel>
-                </RadioButton>
-                <RadioButton x:Name="NavRoam" Style="{StaticResource Nav}">
-                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8AB;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Роуминг"/></StackPanel>
                 </RadioButton>
                 <TextBlock Text="SSH" Style="{StaticResource Caption}" Margin="12,16,0,4"/>
                 <RadioButton x:Name="NavHosts" Style="{StaticResource Nav}" IsChecked="True">
@@ -1002,6 +992,116 @@
                         </Border>
                     </Grid>
 
+                    <!-- WI-FI WIZARD (scanner, planner and roaming monitor panels are moved into WhHost at start-up) -->
+                    <DockPanel x:Name="PageWifiHub" Visibility="Collapsed" Margin="26,0,18,14">
+                        <Border DockPanel.Dock="Top" Style="{StaticResource CardBox}" Padding="10,8">
+                            <DockPanel>
+                                <Button x:Name="WhAir" DockPanel.Dock="Right" Style="{StaticResource GhostBtn}" Padding="10,6" ToolTip="Эфир: все сети вокруг, каналы, соседи">
+                                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE701;" Style="{StaticResource Glyph}"/><TextBlock Text="Эфир"/></StackPanel>
+                                </Button>
+                                <WrapPanel x:Name="WhSteps"/>
+                            </DockPanel>
+                        </Border>
+                        <Border DockPanel.Dock="Top" Style="{StaticResource CardBox}" Padding="16,12" Margin="0,8,0,0">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock x:Name="WhTitle" FontFamily="{StaticResource DisplayFont}" FontSize="17" FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="WhText" Foreground="{StaticResource Sub}" FontSize="12.5" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                                    <WrapPanel x:Name="WhCalcExtra" Margin="0,10,0,0" Visibility="Collapsed">
+                                        <Button x:Name="WhCopySheet" Style="{StaticResource Btn}" Padding="12,6" Margin="0,0,8,0">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8A5;" Style="{StaticResource Glyph}"/><TextBlock Text="Лист для Omada"/></StackPanel>
+                                        </Button>
+                                        <CheckBox x:Name="WhApplied" Style="{StaticResource Switch}" Content="Внёс значения в Omada" VerticalAlignment="Center" Margin="0,0,14,0"/>
+                                        <Button x:Name="WhAdopt" Style="{StaticResource Btn}" Padding="12,6" ToolTip="Записать рекомендованные мощности как текущие — следующий расчёт пойдёт от них">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE73E;" Style="{StaticResource Glyph}"/><TextBlock Text="Принять как текущие"/></StackPanel>
+                                        </Button>
+                                    </WrapPanel>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top" Margin="16,0,0,0">
+                                    <Button x:Name="WhPrev" Style="{StaticResource Btn}" Padding="14,8">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72B;" Style="{StaticResource Glyph}"/><TextBlock Text="Назад"/></StackPanel>
+                                    </Button>
+                                    <Button x:Name="WhNext" Style="{StaticResource AccentBtn}" Padding="16,8" Margin="8,0,0,0">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Text="Далее"/><TextBlock Text="&#xE72A;" Style="{StaticResource Glyph}" Margin="8,0,0,0"/></StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                        <Grid x:Name="WhHost" Margin="0,8,0,0">
+                            <!-- step 1: preparation -->
+                            <ScrollViewer x:Name="WhPrep" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+                                <StackPanel>
+                                    <Border x:Name="WhNoRouter" Background="{StaticResource WarnSoft}" BorderBrush="{StaticResource Warn}" BorderThickness="1" CornerRadius="10" Padding="16,12" Margin="0,0,0,8" Visibility="Collapsed">
+                                        <DockPanel>
+                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+                                                <Button x:Name="WhNoRtFind" Style="{StaticResource AccentBtn}" Padding="12,7"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE721;" Style="{StaticResource Glyph}"/><TextBlock Text="Найти в сети"/></StackPanel></Button>
+                                                <Button x:Name="WhNoRtAdd" Style="{StaticResource Btn}" Padding="12,7" Margin="8,0,0,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE710;" Style="{StaticResource Glyph}"/><TextBlock Text="Вручную"/></StackPanel></Button>
+                                            </StackPanel>
+                                            <StackPanel>
+                                                <TextBlock Text="Сначала подключи роутер MikroTik объекта" FontWeight="SemiBold" FontSize="14" Foreground="{StaticResource Text}"/>
+                                                <TextBlock TextWrapping="Wrap" FontSize="12.5" Foreground="{StaticResource Sub}" Margin="0,4,0,0" Text="Роутер даёт мастеру список точек с именами (из DHCP), пинг точек и шлюза во время теста роуминга и журнал DHCP. Подключи ноутбук к сети объекта и нажми «Найти в сети» — MikroTik найдутся как в Winbox; после проверки NetKnife предложит создать на роутере пользователя только для чтения."/>
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </Border>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <Border Style="{StaticResource CardBox}" Margin="0">
+                                            <StackPanel>
+                                                <TextBlock Text="ОБЪЕКТ" Style="{StaticResource Caption}"/>
+                                                <DockPanel>
+                                                    <Button x:Name="WhSitePick" DockPanel.Dock="Right" Style="{StaticResource IconBtn}" Content="&#xE70D;" Width="30" Height="36" Margin="4,0,0,0" ToolTip="Сохранённые объекты"/>
+                                                    <TextBox x:Name="WhSite" Style="{StaticResource Field}" Tag="Алые Паруса 115"/>
+                                                </DockPanel>
+                                                <TextBlock Text="SSID ОБЪЕКТА (через запятую)" Style="{StaticResource Caption}" Margin="2,12,0,6"/>
+                                                <TextBox x:Name="WhSsids" Style="{StaticResource MonoField}" Tag="Home, Home_IoT"/>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Grid.Column="2" Style="{StaticResource CardBox}" Margin="0">
+                                            <StackPanel>
+                                                <TextBlock Text="РОУТЕР ОБЪЕКТА (MIKROTIK)" Style="{StaticResource Caption}"/>
+                                                <ComboBox x:Name="WhRouter" Margin="0,2,0,8"/>
+                                                <WrapPanel>
+                                                    <Button x:Name="WhFind" Style="{StaticResource AccentBtn}" Padding="10,6" Margin="0,0,6,6"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE721;" Style="{StaticResource Glyph}"/><TextBlock Text="Найти в сети"/></StackPanel></Button>
+                                                    <Button x:Name="WhTest" Style="{StaticResource Btn}" Padding="10,6" Margin="0,0,6,6"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE73E;" Style="{StaticResource Glyph}"/><TextBlock Text="Проверить"/></StackPanel></Button>
+                                                    <Button x:Name="WhPrepare" Style="{StaticResource Btn}" Padding="10,6" Margin="0,0,6,6" ToolTip="Создать на роутере пользователя netknife только на чтение"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72E;" Style="{StaticResource Glyph}"/><TextBlock Text="Подготовить"/></StackPanel></Button>
+                                                </WrapPanel>
+                                                <TextBlock x:Name="WhRouterStatus" Foreground="{StaticResource Sub}" FontSize="12" TextWrapping="Wrap"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                    <Border Style="{StaticResource CardBox}" Margin="0,8,0,0">
+                                        <StackPanel>
+                                            <DockPanel>
+                                                <Button x:Name="WhApsRefresh" DockPanel.Dock="Right" Style="{StaticResource GhostBtn}" Padding="10,4"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" Style="{StaticResource Glyph}" FontSize="12"/><TextBlock Text="Обновить с роутера"/></StackPanel></Button>
+                                                <TextBlock Text="ТОЧКИ ОБЪЕКТА  (2×клик — имя и текущая мощность из Omada)" Style="{StaticResource Caption}" VerticalAlignment="Center"/>
+                                            </DockPanel>
+                                            <ListBox x:Name="WhAps" Height="190" Margin="0,6,0,0" Background="Transparent" BorderThickness="1" BorderBrush="{StaticResource Line}" Foreground="{StaticResource Text}" FontFamily="{StaticResource MonoFont}" FontSize="12"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource CardBox}" Margin="0,8,0,0">
+                                        <StackPanel>
+                                            <TextBlock Text="ГОТОВНОСТЬ" Style="{StaticResource Caption}"/>
+                                            <TextBlock x:Name="WhChecks" FontFamily="{StaticResource MonoFont}" FontSize="12.5" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </ScrollViewer>
+                            <!-- step 7: summary -->
+                            <Border x:Name="WhSummary" Style="{StaticResource CardBox}" Padding="14,12" Margin="0" Visibility="Collapsed">
+                                <DockPanel>
+                                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+                                        <Button x:Name="WhSumRefresh" Style="{StaticResource Btn}" Padding="12,7"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" Style="{StaticResource Glyph}"/><TextBlock Text="Обновить"/></StackPanel></Button>
+                                        <Button x:Name="WhSumHtml" Style="{StaticResource AccentBtn}" Padding="12,7" Margin="8,0,0,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8A1;" Style="{StaticResource Glyph}"/><TextBlock Text="HTML-отчёт"/></StackPanel></Button>
+                                        <Button x:Name="WhSumAi" Style="{StaticResource Btn}" Padding="12,7" Margin="8,0,0,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE99A;" Style="{StaticResource Glyph}"/><TextBlock Text="Совет ИИ"/></StackPanel></Button>
+                                        <Button x:Name="WhSumCopy" Style="{StaticResource GhostBtn}" Padding="12,7" Margin="8,0,0,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8C8;" Style="{StaticResource Glyph}"/><TextBlock Text="Копировать"/></StackPanel></Button>
+                                    </StackPanel>
+                                    <TextBox x:Name="WhSumText" Style="{StaticResource Code}" FontSize="12" TextWrapping="NoWrap" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"/>
+                                </DockPanel>
+                            </Border>
+                        </Grid>
+                    </DockPanel>
+
                     <!-- SETTINGS -->
                     <ScrollViewer x:Name="PageSettings" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" Padding="26,0,18,16">
                         <StackPanel MaxWidth="620" HorizontalAlignment="Left">
@@ -1032,9 +1132,10 @@
                                     <TextBlock Text="Для диагностики: DHCP и ARP ноутбука, пинг роутер → точки, журнал и порты. NetKnife ходит пользователем netknife только на чтение (создаётся кнопкой «Подготовить» через админ-доступ). Имена точек Omada берутся из DHCP." Foreground="{StaticResource Sub}" FontSize="12" Margin="0,2,0,8" TextWrapping="Wrap"/>
                                     <ListBox x:Name="SetMtList" Height="96" Background="Transparent" BorderThickness="1" BorderBrush="{StaticResource Line}" Foreground="{StaticResource Text}" FontFamily="{StaticResource MonoFont}" FontSize="12"/>
                                     <WrapPanel Margin="0,8,0,0">
-                                        <Button x:Name="SetMtAdd" Style="{StaticResource Btn}" Padding="10,6" Margin="0,0,6,6"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE710;" Style="{StaticResource Glyph}"/><TextBlock Text="Добавить"/></StackPanel></Button>
+                                        <Button x:Name="SetMtFind" Style="{StaticResource AccentBtn}" Padding="10,6" Margin="0,0,6,6" ToolTip="Поиск MikroTik в локальной сети по MNDP, как в Winbox"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE721;" Style="{StaticResource Glyph}"/><TextBlock Text="Найти в сети"/></StackPanel></Button>
+                                        <Button x:Name="SetMtAdd" Style="{StaticResource Btn}" Padding="10,6" Margin="0,0,6,6"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE710;" Style="{StaticResource Glyph}"/><TextBlock Text="Вручную"/></StackPanel></Button>
                                         <Button x:Name="SetMtEdit" Style="{StaticResource Btn}" Padding="10,6" Margin="0,0,6,6"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE70F;" Style="{StaticResource Glyph}"/><TextBlock Text="Изменить"/></StackPanel></Button>
-                                        <Button x:Name="SetMtPrep" Style="{StaticResource AccentBtn}" Padding="10,6" Margin="0,0,6,6" ToolTip="Создать на роутере пользователя netknife (только чтение) и группы netknife-ro / netknife-rw"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72E;" Style="{StaticResource Glyph}"/><TextBlock Text="Подготовить"/></StackPanel></Button>
+                                        <Button x:Name="SetMtPrep" Style="{StaticResource Btn}" Padding="10,6" Margin="0,0,6,6" ToolTip="Создать на роутере пользователя netknife (только чтение) и группы netknife-ro / netknife-rw"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72E;" Style="{StaticResource Glyph}"/><TextBlock Text="Подготовить"/></StackPanel></Button>
                                         <Button x:Name="SetMtTest" Style="{StaticResource Btn}" Padding="10,6" Margin="0,0,6,6"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE73E;" Style="{StaticResource Glyph}"/><TextBlock Text="Проверить"/></StackPanel></Button>
                                         <Button x:Name="SetMtAps" Style="{StaticResource Btn}" Padding="10,6" Margin="0,0,6,6" ToolTip="Точки Omada из DHCP роутера: имя, MAC, IP"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE701;" Style="{StaticResource Glyph}"/><TextBlock Text="Точки"/></StackPanel></Button>
                                         <Button x:Name="SetMtDel" Style="{StaticResource GhostBtn}" Padding="10,6" Margin="0,0,6,6"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74D;" Style="{StaticResource Glyph}"/><TextBlock Text="Убрать"/></StackPanel></Button>

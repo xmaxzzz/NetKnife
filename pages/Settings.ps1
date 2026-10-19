@@ -10,6 +10,7 @@ function Initialize-SettingsPage {
     $Ui.SetStartupPage.DisplayMemberPath = "Label"
     $Ui.SetStartupPage.SelectedValuePath = "Key"
     $Cur = "$($script:Settings.StartupPage)"
+    if ($Cur -in @("wplan", "roam")) { $Cur = "wifi" }
     if (-not $script:Pages.Contains($Cur)) { $Cur = "hosts" }
     $Ui.SetStartupPage.SelectedValue = $Cur
     $Ui.SetStartupPage.Add_SelectionChanged({

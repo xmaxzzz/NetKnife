@@ -539,6 +539,7 @@ function Get-HostMenuItems {
         (New-MenuItem "Отправить файлы (scp)…" 0xE898 { $H = Get-SelectedHost; if ($H) { Show-SendFilesDialog $H } })
         (New-MenuItem "Туннель через этот хост…" 0xE8AB { $T = Show-TunnelDialog; if ($T) { Set-Page "tunnels"; Start-Tunnel $T } })
         "-"
+        (New-MenuItem "Новый сервер…" 0xE710 { Show-NewServerDialog })
         (New-MenuItem "Установить ключ по паролю…" 0xE72E { $H = Get-SelectedHost; if ($H) { Show-NewServerDialog $H } })
         (New-MenuItem "Удалить из config…" 0xE74D { $H = Get-SelectedHost; if ($H) { Remove-HostBlock $H } } "Del" "Fail")
     )
@@ -814,7 +815,6 @@ function Initialize-HostsPage {
     $Ui.TestAllBtn.Add_Click({ Start-SshTest @($script:Hosts | ForEach-Object Alias) })
     $Ui.WebProbeBtn.Add_Click({ $script:WebProbeManual = $true; Start-WebProbe; Show-Toast "Проверяю HTTP/HTTPS…" "info" })
     $Ui.RefreshBtn.Add_Click({ Refresh-Ssh; Show-Toast "Перечитано" })
-    $Ui.NewServerBtn.Add_Click({ Show-NewServerDialog })
 
     $Ui.HdKeyToggle.Add_Click({
         $On = ($Ui.HdKeyCard.Visibility -ne "Visible")

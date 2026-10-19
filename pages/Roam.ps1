@@ -384,6 +384,7 @@ function Stop-RoamMonitor {
     Update-RoamAps
     if (-not $Quiet) { $Ui.RoamDiag.Text = Get-RoamDiagnosis }
     Save-RoamSession
+    if (-not $Quiet) { try { Save-WhRoamResult } catch { Write-AppLog "wizard roam save: $_" } }
     Update-PageSub
 }
 

@@ -201,6 +201,8 @@ function Test-MtRouter {
         if (-not $J) { Set-MtStatus "$($Rt.Name): ответ не разобран — нужен RouterOS 7.13+ (:serialize)" "fail"; return }
         Set-MtStatus "$($Rt.Name): $($J.id) · $($J.board) · RouterOS $($J.ver) · вход как $(if ($Rt.Ready) { 'netknife (только чтение)' } else { "$($Rt.Admin) (админ — подготовь netknife)" })" "ok"
         Start-MtApRefresh $Rt
+        # right after adding a found router: propose creating the read-only user straight away
+        if ($script:MtOfferPrep -and -not $Rt.Ready) { $script:MtOfferPrep = $false; Initialize-MtUser $Rt }
     }
 }
 
@@ -261,9 +263,9 @@ function Stop-MtFeed { Stop-Worker "roam-mt"; Stop-Worker "roam-mtlog" }
 
 function Set-MtStatus {
     param([string]$Text, [string]$Kind = "info")
-    if (-not $Ui.SetMtStatus) { return }
-    $Ui.SetMtStatus.Text = $Text
-    $Ui.SetMtStatus.Foreground = Get-Brush $(switch ($Kind) { "ok" { "Ok" } "fail" { "Fail" } "wait" { "Warn" } default { "Sub" } })
+    $Br = Get-Brush $(switch ($Kind) { "ok" { "Ok" } "fail" { "Fail" } "wait" { "Warn" } default { "Sub" } })
+    foreach ($T in @($Ui.SetMtStatus, $Ui.WhRouterStatus)) { if ($T) { $T.Text = $Text; $T.Foreground = $Br } }
+    if ($Ui.WhAps -and $script:WhInit -and $Kind -eq "ok") { try { Update-WhPrep } catch { } }
 }
 
 function Refresh-MtList {
@@ -321,8 +323,8 @@ function Show-MtRouterDialog {
     })
     $D.Add_ContentRendered({ [void]$F.FName.Focus() })
     if (-not $D.ShowDialog()) { return }
-    $New = @{ Id = $(if ($R) { $R.Id } else { [guid]::NewGuid().ToString("N").Substring(0, 8) }); Name = $F.FName.Text.Trim(); Host = (Repair-TargetText $F.FHost); Port = [int]$F.FPort.Text.Trim()
-        Admin = $F.FAdmin.Text.Trim(); AdminKey = $F.FKey.Text.Trim(); Ready = $(if ($R) { [bool]$R.Ready } else { $false }); PassEnc = $(if ($R) { $R.PassEnc } else { "" }) }
+    $New = @{ Id = $(if ($R -and $R.Id) { $R.Id } else { [guid]::NewGuid().ToString("N").Substring(0, 8) }); Name = $F.FName.Text.Trim(); Host = (Repair-TargetText $F.FHost); Port = [int]$F.FPort.Text.Trim()
+        Admin = $F.FAdmin.Text.Trim(); AdminKey = $F.FKey.Text.Trim(); Ready = $(if ($R) { [bool]$R.Ready } else { $false }); PassEnc = $(if ($R) { "$($R.PassEnc)" } else { "" }) }
     $L = @(Get-MtRouters | Where-Object { $_.Id -ne $New.Id }) + @($New)
     $script:Settings.Routers = $L
     Save-Settings
@@ -344,6 +346,7 @@ function Initialize-MtSettings {
     if (-not $Ui.SetMtList) { return }
     Refresh-MtList
     $Ui.SetMtAdd.Add_Click({ Show-MtRouterDialog $null })
+    $Ui.SetMtFind.Add_Click({ Start-MtDiscovery })
     $Ui.SetMtEdit.Add_Click({ $R = Get-MtSelected; if ($R) { Show-MtRouterDialog $R } })
     $Ui.SetMtList.Add_MouseDoubleClick({ $R = Get-MtSelected; if ($R) { Show-MtRouterDialog $R } })
     $Ui.SetMtPrep.Add_Click({ $R = Get-MtSelected; if ($R) { Initialize-MtUser $R } })
