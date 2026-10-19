@@ -309,7 +309,7 @@ function Initialize-WifiHub {
         Set-WhStep ($script:WhStep + 1)
     })
     $Ui.WhNoRtFind.Add_Click({ Start-MtDiscovery { param($T, $K) Set-MtStatus $T $K } })
-    $Ui.WhNoRtAdd.Add_Click({ Show-MtRouterDialog $null; Update-WhPrep })
+    $Ui.WhNoRtAdd.Add_Click({ Show-MtConnectDialog $null; Update-WhPrep })
     $Ui.WhAir.Add_Click({ Show-WhAir })
     Add-PickMenu $Ui.WhSitePick $Ui.WhSite { @(Get-WplanSites | ForEach-Object { [pscustomobject]@{ Label = $_; Value = $_ } }) }
     $Ui.WhSite.Add_LostKeyboardFocus({ $S = $Ui.WhSite.Text.Trim(); if ($S -and (-not $script:Wplan -or $script:Wplan.Site -ne $S)) { Set-WhSite $S } })
@@ -317,7 +317,7 @@ function Initialize-WifiHub {
     $Ui.WhSsids.Add_LostKeyboardFocus({ if ($script:Wplan) { $Ui.WpSsids.Text = $Ui.WhSsids.Text; Use-WplanSite; Save-Wplan; $script:WplanLastReport = $null; Update-WhPrep } })
     $Ui.WhRouter.Add_SelectionChanged({ Set-WhRouter })
     $Ui.WhFind.Add_Click({ Start-MtDiscovery { param($T, $K) Set-MtStatus $T $K } })
-    $Ui.WhPrepare.Add_Click({ $R = Get-MtRouter "$($Ui.WhRouter.SelectedValue)"; if ($R) { Initialize-MtUser $R } else { Show-Toast "Выбери роутер" "warn" } })
+    $Ui.WhPrepare.Add_Click({ $R = Get-MtRouter "$($Ui.WhRouter.SelectedValue)"; Show-MtConnectDialog $R; Update-WhPrep })
     $Ui.WhTest.Add_Click({ $R = Get-MtRouter "$($Ui.WhRouter.SelectedValue)"; if ($R) { Set-MtStatus "$($R.Name): подключаюсь…" "wait"; Test-MtRouter $R } else { Show-Toast "Выбери роутер" "warn" } })
     $Ui.WhApsRefresh.Add_Click({ $R = Get-MtRouter "$($Ui.WhRouter.SelectedValue)"; if ($R) { Start-MtApRefresh $R { param($A) Update-WhPrep } } else { Show-Toast "Выбери роутер" "warn" } })
     $Ui.WhAps.Add_MouseDoubleClick({ Open-WhApDialog })

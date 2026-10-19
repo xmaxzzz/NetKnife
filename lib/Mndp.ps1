@@ -124,7 +124,7 @@ function Show-MtFoundDialog {
     $D = New-Dialog "Найденные MikroTik" @"
 <StackPanel>
     <TextBlock Text="Найденные MikroTik" FontFamily="{StaticResource DisplayFont}" FontSize="20" FontWeight="SemiBold"/>
-    <TextBlock Text="Выбери роутер — откроется карточка с подставленными данными, затем проверка и предложение подготовить пользователя netknife." Foreground="{StaticResource Sub}" TextWrapping="Wrap" Margin="0,6,0,12" FontSize="12.5"/>
+    <TextBlock Text="Выбери роутер — откроется карточка с готовыми командами для его терминала (Winbox → New Terminal). Пароль админа не нужен." Foreground="{StaticResource Sub}" TextWrapping="Wrap" Margin="0,6,0,12" FontSize="12.5"/>
     <ListBox x:Name="FList" Height="220" Background="Transparent" BorderThickness="1" BorderBrush="{StaticResource Line}" Foreground="{StaticResource Text}" FontFamily="{StaticResource MonoFont}" FontSize="12"/>
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
         <Button Style="{StaticResource Btn}" Content="Закрыть" MinWidth="96" IsCancel="True"/>
@@ -142,8 +142,6 @@ function Show-MtFoundDialog {
     if (-not $D.ShowDialog()) { return }
     $M = $FList.SelectedItem.M
     $Ex = @(Get-MtRouters) | Where-Object { $_.Host -eq $M.Ip } | Select-Object -First 1
-    $script:MtOfferPrep = $true
-    if ($Ex) { Show-MtRouterDialog $Ex; return }
-    Show-MtRouterDialog @{ Id = ""; Name = $(if ($M.Identity) { $M.Identity } else { $M.Ip }); Host = $M.Ip; Port = $(if ($M.Port) { $M.Port } else { 10322 })
-        Admin = $(if ($M.Port -eq 22) { "admin" } else { "butler" }); AdminKey = "~/.ssh/mikrotik_rsa"; Ready = $false; PassEnc = "" }
+    if ($Ex) { Show-MtConnectDialog $Ex; return }
+    Show-MtConnectDialog @{ Id = ""; Name = $(if ($M.Identity) { $M.Identity } else { $M.Ip }); Host = $M.Ip; Port = $(if ($M.Port) { $M.Port } else { 22 }); SshOff = (-not $M.Port) }
 }
