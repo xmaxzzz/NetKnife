@@ -27,6 +27,7 @@ function Write-AppLog {
 
 . (Join-Path $PSScriptRoot "lib\Tray.ps1")
 . (Join-Path $PSScriptRoot "lib\Update.ps1")
+. (Join-Path $PSScriptRoot "lib\MikroTik.ps1")
 . (Join-Path $PSScriptRoot "pages\Hosts.ps1")
 . (Join-Path $PSScriptRoot "pages\Tunnels.ps1")
 . (Join-Path $PSScriptRoot "pages\Vpn.ps1")
@@ -101,12 +102,12 @@ $script:Pages = [ordered]@{
     ports = @{ Panel = "PagePorts"; Nav = "NavPorts"; Title = "Порты";              Sub = { Get-PortsSub }; Focus = "PortTarget" }
     ping  = @{ Panel = "PagePing";  Nav = "NavPing";  Title = "Пинг и трассировка"; Sub = { Get-PingSub };  Focus = "PingTarget" }
     dns   = @{ Panel = "PageDns";   Nav = "NavDns";   Title = "DNS";                Sub = { Get-DnsSub };   Focus = "DnsName" }
-    wifi  = @{ Panel = "PageWifi";  Nav = "NavWifi";  Title = "Wi-Fi";              Sub = { Get-WifiSub };  Focus = "WifiScan" }
-    wplan = @{ Panel = "PageWplan"; Nav = "NavWplan"; Title = "Wi-Fi план";         Sub = { Get-WplanSub }; Focus = "WpRoom" }
-    roam  = @{ Panel = "PageRoam";  Nav = "NavRoam";  Title = "Монитор роуминга";   Sub = { Get-RoamSub };  Focus = "RoamStart" }
     monitor = @{ Panel = "PageMonitor"; Nav = "NavMonitor"; Title = "Монитор";      Sub = { Get-MonitorSub }; Focus = "MonTarget" }
     vpn   = @{ Panel = "PageVpn";   Nav = "NavVpn";   Title = "VPN";                Sub = { Get-VpnSub };   Focus = "VpnList" }
     conns = @{ Panel = "PageConns"; Nav = "NavConns"; Title = "Соединения программ"; Sub = { Get-ConnsSub }; Focus = "ConnProc" }
+    wifi  = @{ Panel = "PageWifi";  Nav = "NavWifi";  Title = "Wi-Fi";              Sub = { Get-WifiSub };  Focus = "WifiScan" }
+    wplan = @{ Panel = "PageWplan"; Nav = "NavWplan"; Title = "Wi-Fi план";         Sub = { Get-WplanSub }; Focus = "WpRoom" }
+    roam  = @{ Panel = "PageRoam";  Nav = "NavRoam";  Title = "Монитор роуминга";   Sub = { Get-RoamSub };  Focus = "RoamStart" }
     hosts = @{ Panel = "PageHosts"; Nav = "NavHosts"; Title = "Хосты";              Sub = { Get-HostsSub }; Focus = "HostSearch" }
     keys  = @{ Panel = "PageKeys";  Nav = "NavKeys";  Title = "Ключи";              Sub = { Get-KeysSub };  Focus = "KeySearch" }
     tunnels = @{ Panel = "PageTunnels"; Nav = "NavTunnels"; Title = "Туннели";      Sub = { Get-TunnelsSub }; Focus = "TunnelList" }
@@ -336,6 +337,7 @@ $Win.Add_Closing({
     Stop-Vpn -Quiet
     Stop-Worker "conns"
     try { Stop-RoamMonitor -Quiet } catch { }
+    try { Stop-MtFeed } catch { }
     Stop-TermSession
     Stop-ChildJob
     Save-TunnelPids

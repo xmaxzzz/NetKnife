@@ -93,6 +93,8 @@ function Get-RoamApName {
     }
     $Nm = $script:Settings.RoamNames
     if ($Nm -and $Nm[$Bssid]) { return "$($Nm[$Bssid])" }
+    $Mt = Get-MtApName $Bssid
+    if ($Mt) { return $Mt }
     return "…" + $Bssid.Substring([Math]::Max(0, $Bssid.Length - 8))
 }
 
@@ -270,6 +272,12 @@ function Get-RoamApVerdict {
     if ($St.Drops) { if ($Kind -eq "ok") { $Kind = "warn" }; $Msgs += "обрывов шлюза без перехода: $($St.Drops) (всего $(Format-RoamSec $St.DropSec))" }
     if ($St.Disc) { if ($Kind -eq "ok") { $Kind = "warn" }; $Msgs += "Wi-Fi отключался: $($St.Disc) раз" }
     if (@($St.Reasons).Count) { $Msgs += "Windows: " + (@($St.Reasons | Select-Object -Unique) -join "; ") }
+    # router view of the same AP: pings from MikroTik over the wire (switch → AP), independent of Wi-Fi
+    $Rt = $(if ($script:Roam -and $script:Roam.MtAp) { $script:Roam.MtAp[(Get-MtApKey $St.Bssid)] } else { $null })
+    if ($Rt -and ($Rt.Ok + $Rt.Fail) -ge 3) {
+        if ($Rt.Fail) { $Kind = "fail"; $Msgs = @(("с роутера до точки по проводу тоже потери: {0} из {1} — проводная часть (кабель, порт коммутатора, PoE), не Wi-Fi" -f $Rt.Fail, ($Rt.Ok + $Rt.Fail))) + $Msgs }
+        elseif ($Loss -ge 3) { $Msgs += "роутер видит точку по проводу без потерь — значит, теряется на радио-участке или в самой точке (перегрузка, прошивка)" }
+    }
     return @{ Kind = $Kind; Msgs = $Msgs; Rssi = $Rssi; Loss = $Loss; Avg = $Avg; Jit = $Jit; RoamAvg = $RoamAvg }
 }
 
@@ -322,7 +330,17 @@ function Start-RoamMonitor {
     if (-not $Targets.Count) { $Targets = @("8.8.8.8", "77.88.8.8"); $Ui.RoamTargets.Text = $Targets -join ", " }
     $script:Settings.RoamTargets = $Ui.RoamTargets.Text; Save-Settings
     if ($script:Wplan -eq $null -and $script:Settings.WplanSite) { try { $script:Wplan = Read-Wplan "$($script:Settings.WplanSite)" } catch { } }   # AP names from the planner
-    $script:Roam = @{ Running = $true; Started = [DateTime]::Now; Stats = @{}; Log = [System.Collections.Generic.List[object]]::new(); Prev = $null; Last = $null; Pending = $null; Out = $null; Disc = $null; GwMac = ""; GwMacIp = ""; Count = 0 }
+    $script:Roam = @{ Running = $true; Started = [DateTime]::Now; Stats = @{}; Log = [System.Collections.Generic.List[object]]::new(); Prev = $null; Last = $null; Pending = $null; Out = $null; Disc = $null; GwMac = ""; GwMacIp = ""; Count = 0
+        Mt = $null; MtAp = @{} }
+    $RtId = "$($Ui.RoamRouter.SelectedValue)"
+    $script:Settings.RoamRouterId = $RtId; Save-Settings
+    if ($RtId) {
+        $Rt = Get-MtRouter $RtId
+        if ($Rt) {
+            $script:Roam.Mt = @{ Router = $Rt; Ip = ""; Mac = ""; Lease = ""; Streak = @{}; If = @{}; Err = $false }
+            Start-MtApRefresh $Rt   # fresh AP list + names from DHCP
+        }
+    }
     $script:RoamEvents.Clear(); $script:RoamApItems.Clear()
     $Ui.RoamStart.IsEnabled = $false; $Ui.RoamStop.IsEnabled = $true
     $Ui.RoamDiag.Text = ""
@@ -334,6 +352,14 @@ function Start-RoamMonitor {
             "rs" {
                 Invoke-RoamSample $M
                 Update-RoamNow $M
+                # router feed follows the laptop's address (a roam into another subnet restarts it)
+                $Mt = $script:Roam.Mt
+                if ($Mt -and $M.Ip -and $M.Ip -ne $Mt.Ip) {
+                    $First = -not $Mt.Ip
+                    $Mt.Ip = $M.Ip
+                    Start-MtFeed $Mt.Router $M.Ip { param($X) Invoke-RoamMt $X }
+                    if ($First) { [void](Add-RoamEvent ([DateTime]::Now) "info" "MikroTik $($Mt.Router.Name): подключаюсь" "ARP/DHCP ноутбука $($M.Ip), пинг до точек, журнал, порты · вход: $(if ($Mt.Router.Ready) { 'netknife (только чтение)' } else { $Mt.Router.Admin })") }
+                }
                 if ($script:Roam.Count % 4 -eq 0) { Update-RoamAps }
             }
             "rwin" {
@@ -349,6 +375,7 @@ function Start-RoamMonitor {
 function Stop-RoamMonitor {
     param([switch]$Quiet)
     Stop-Worker "roam"
+    Stop-MtFeed
     if (-not $script:Roam -or -not $script:Roam.Running) { return }
     $script:Roam.Running = $false
     if ($script:Roam.Pending) { Complete-RoamPending ([DateTime]::Now) }
@@ -439,10 +466,108 @@ function Show-RoamNameDialog {
     Update-RoamAps
 }
 
+# ---------------------------------------------------------------- MikroTik feed
+
+function Update-RoamRouterList {
+    if (-not $Ui.RoamRouter) { return }
+    $Items = @([pscustomobject]@{ Id = ""; Label = "— без роутера —" }) + @(Get-MtRouters | ForEach-Object { [pscustomobject]@{ Id = $_.Id; Label = "$($_.Name)$(if (-not $_.Ready) { ' (не подготовлен)' })" } })
+    $Ui.RoamRouter.ItemsSource = $Items
+    $Ui.RoamRouter.DisplayMemberPath = "Label"; $Ui.RoamRouter.SelectedValuePath = "Id"
+    $Want = "$($script:Settings.RoamRouterId)"
+    $Ui.RoamRouter.SelectedValue = $(if ($Want -and ($Items | Where-Object { $_.Id -eq $Want })) { $Want } else { "" })
+}
+
+# AP list of the selected router (from the last DHCP read): ip → AP
+function Get-RoamMtApByIp {
+    param([string]$Ip)
+    $Mt = $script:Roam.Mt
+    if (-not $Mt) { return $null }
+    return @(Get-MtCachedAps $Mt.Router.Id) | Where-Object { $_.Ip -eq $Ip } | Select-Object -First 1
+}
+
+function Invoke-RoamMt {
+    param($X)
+    $R = $script:Roam
+    if (-not $R -or -not $R.Running -or -not $R.Mt) { return }
+    $Mt = $R.Mt
+    $Now = [DateTime]::Now
+    $Rn = "MikroTik"
+    if ($X.Error) {
+        if (-not $Mt.Err) { $Mt.Err = $true; [void](Add-RoamEvent $Now "fail" "$($Rn): $($X.Error)" "проверь роутер в Настройках → Роутеры MikroTik") }
+        return
+    }
+    if ($X.Kind -eq "log") {
+        $L = $X.Line -replace '^\d{4}-\d\d-\d\d\s+', '' -replace '^\d\d:\d\d:\d\d\s+', ''
+        if ($L -match 'ssh-cmd:|executing script from sshd') { return }   # our own session noise
+        $IsDhcp = ($X.Line -match '\bdhcp')
+        if ($IsDhcp) {
+            $Hit = $false
+            if ($Mt.Mac -and $X.Line -match [regex]::Escape($Mt.Mac)) { $Hit = $true }
+            if ($Mt.Ip -and $X.Line -match "\b$([regex]::Escape($Mt.Ip))\b") { $Hit = $true }
+            foreach ($A in @(Get-MtCachedAps $Mt.Router.Id)) { if ($X.Line -match [regex]::Escape($A.Mac)) { $Hit = $true; break } }
+            if (-not $Hit) { return }
+        }
+        $K = $(if ($X.Line -match '(?i)link down|error|fail|loop|conflict|without success|declin|critical') { "fail" } elseif ($X.Line -match '(?i)link up|warning') { "warn" } else { "info" })
+        [void](Add-RoamEvent $Now $K "$($Rn): $L" "журнал роутера")
+        return
+    }
+    $J = $null; try { $J = $X.Json | ConvertFrom-Json -AsHashtable } catch { return }
+    $Mt.Err = $false
+    switch ($X.Tag) {
+        "J" {
+            $Arp = @($J.arp) | Select-Object -First 1
+            if ($Arp -and $Arp.'mac-address') { $Mt.Mac = "$($Arp.'mac-address')".ToUpper() }
+            $Ls = @($J.lease) | Select-Object -First 1
+            $Sig = $(if ($Ls) { "$($Ls.address)|$($Ls.server)|$($Ls.status)" } else { "" })
+            if ($Ls -and $Sig -ne $Mt.Lease) {
+                $Old = $Mt.Lease
+                $Mt.Lease = $Sig
+                $Kind = $(if ($Old -and ($Old -split '\|')[1] -ne "$($Ls.server)") { "fail" } elseif ($Old) { "warn" } else { "info" })
+                [void](Add-RoamEvent $Now $Kind "$($Rn): DHCP ноутбука — $($Ls.address) от $($Ls.server), статус $($Ls.status)" $(if ($Kind -eq "fail") { "сменился DHCP-сервер (был $(($Old -split '\|')[1])) — ноутбук попал в другой VLAN" } else { "MAC $($Ls.'mac-address') · последний раз $($Ls.'last-seen')" }))
+            }
+        }
+        "P" {
+            foreach ($Ip in @($J.Keys)) {
+                $Ok = ([int]$J[$Ip] -ge 1)
+                $Ap = Get-RoamMtApByIp $Ip
+                $Key = $(if ($Ap) { $Ap.Key } else { "ip:$Ip" })
+                $Name = $(if ($Ap -and $Ap.Name) { $Ap.Name } else { $Ip })
+                if (-not $R.MtAp.ContainsKey($Key)) { $R.MtAp[$Key] = @{ Ok = 0; Fail = 0; Name = $Name; Ip = $Ip } }
+                $S = $R.MtAp[$Key]
+                if ($Ok) { $S.Ok++ } else { $S.Fail++ }
+                $Prev = [int]$Mt.Streak[$Ip]
+                if ($Ok) {
+                    if ($Prev -ge 2) { [void](Add-RoamEvent $Now "ok" "$($Rn): точка $Name ($Ip) снова отвечает роутеру" "не отвечала $Prev проверок подряд (~$(10 * $Prev) с)") }
+                    $Mt.Streak[$Ip] = 0
+                } else {
+                    $Mt.Streak[$Ip] = $Prev + 1
+                    if ($Prev + 1 -eq 2) { [void](Add-RoamEvent $Now "fail" "$($Rn): точка $Name ($Ip) не отвечает роутеру" "пинг по проводу роутер → коммутатор → точка: проблема в проводной части или точка перезагружается") }
+                }
+            }
+        }
+        "I" {
+            foreach ($If in @($J)) {
+                $Nm = "$($If.name)"
+                $Cur = @{ Run = [bool]$If.running }
+                foreach ($F in @("rx-error", "tx-error", "rx-drop", "tx-drop")) { $Cur[$F] = [long]$(if ($null -ne $If[$F]) { $If[$F] } else { 0 }) }
+                $Old = $Mt.If[$Nm]
+                if ($Old) {
+                    if ($Old.Run -ne $Cur.Run) { [void](Add-RoamEvent $Now $(if ($Cur.Run) { "warn" } else { "fail" }) "$($Rn): $Nm $(if ($Cur.Run) { 'поднялся' } else { 'упал (нет линка)' })" "порт роутера") }
+                    $D = @()
+                    foreach ($F in @("rx-error", "tx-error", "rx-drop", "tx-drop")) { $Dl = $Cur[$F] - $Old[$F]; if ($Dl -gt 0) { $D += "$F +$Dl" } }
+                    if ($D.Count) { [void](Add-RoamEvent $Now "warn" "$($Rn): ошибки на $Nm" (($D -join ", ") + " за ~10 с — кабель/порт до коммутатора или перегрузка")) }
+                }
+                $Mt.If[$Nm] = $Cur
+            }
+        }
+    }
+}
+
 function Initialize-RoamPage {
     $Ui.RoamEvents.ItemsSource = $script:RoamEvents
     $Ui.RoamAps.ItemsSource = $script:RoamApItems
     $Ui.RoamTargets.Text = $(if ($script:Settings.RoamTargets) { "$($script:Settings.RoamTargets)" } else { "8.8.8.8, 77.88.8.8" })
+    Update-RoamRouterList
     $Ui.RoamStart.Add_Click({ Start-RoamMonitor })
     $Ui.RoamStop.Add_Click({ Stop-RoamMonitor })
     $Ui.RoamDiagBtn.Add_Click({ Update-RoamAps; $Ui.RoamDiag.Text = Get-RoamDiagnosis })

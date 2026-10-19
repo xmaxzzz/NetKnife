@@ -455,15 +455,6 @@
                 <RadioButton x:Name="NavDns" Style="{StaticResource Nav}">
                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE774;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="DNS"/></StackPanel>
                 </RadioButton>
-                <RadioButton x:Name="NavWifi" Style="{StaticResource Nav}">
-                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE701;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Wi-Fi"/></StackPanel>
-                </RadioButton>
-                <RadioButton x:Name="NavWplan" Style="{StaticResource Nav}">
-                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE707;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Wi-Fi план"/></StackPanel>
-                </RadioButton>
-                <RadioButton x:Name="NavRoam" Style="{StaticResource Nav}">
-                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8AB;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Роуминг"/></StackPanel>
-                </RadioButton>
                 <RadioButton x:Name="NavMonitor" Style="{StaticResource Nav}">
                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9D2;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Монитор"/></StackPanel>
                 </RadioButton>
@@ -472,6 +463,16 @@
                 </RadioButton>
                 <RadioButton x:Name="NavConns" Style="{StaticResource Nav}">
                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8CE;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Соединения"/></StackPanel>
+                </RadioButton>
+                <TextBlock Text="WI-FI" Style="{StaticResource Caption}" Margin="12,16,0,4"/>
+                <RadioButton x:Name="NavWifi" Style="{StaticResource Nav}">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE701;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Wi-Fi"/></StackPanel>
+                </RadioButton>
+                <RadioButton x:Name="NavWplan" Style="{StaticResource Nav}">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE707;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Wi-Fi план"/></StackPanel>
+                </RadioButton>
+                <RadioButton x:Name="NavRoam" Style="{StaticResource Nav}">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8AB;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Роуминг"/></StackPanel>
                 </RadioButton>
                 <TextBlock Text="SSH" Style="{StaticResource Caption}" Margin="12,16,0,4"/>
                 <RadioButton x:Name="NavHosts" Style="{StaticResource Nav}" IsChecked="True">
@@ -958,10 +959,6 @@
                                             <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE71A;" Style="{StaticResource Glyph}"/><TextBlock Text="Стоп и диагноз"/></StackPanel>
                                         </Button>
                                     </StackPanel>
-                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center">
-                                        <TextBlock Text="Интернет (ICMP):" Foreground="{StaticResource Sub}" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                        <TextBox x:Name="RoamTargets" Style="{StaticResource MonoField}" Width="220" Height="32" FontSize="12.5" ToolTip="Адреса для проверки интернета; успех любого = интернет есть"/>
-                                    </StackPanel>
                                     <StackPanel Grid.Column="2" Orientation="Horizontal">
                                         <Button x:Name="RoamDiagBtn" Style="{StaticResource Btn}" Padding="12,7">
                                             <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9D9;" Style="{StaticResource Glyph}"/><TextBlock Text="Диагноз"/></StackPanel>
@@ -977,6 +974,12 @@
                                         </Button>
                                     </StackPanel>
                                 </Grid>
+                                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                    <TextBlock Text="Роутер объекта:" Foreground="{StaticResource Sub}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <ComboBox x:Name="RoamRouter" Width="240" VerticalAlignment="Center" ToolTip="MikroTik объекта: DHCP/ARP ноутбука, пинг роутер → точки, журнал и счётчики портов на той же ленте"/>
+                                    <TextBlock Text="Интернет (ICMP):" Foreground="{StaticResource Sub}" VerticalAlignment="Center" Margin="18,0,8,0"/>
+                                    <TextBox x:Name="RoamTargets" Style="{StaticResource MonoField}" Width="200" Height="32" FontSize="12.5" ToolTip="Адреса для проверки интернета; успех любого = интернет есть"/>
+                                </StackPanel>
                             </StackPanel>
                         </Border>
                         <Grid Grid.Row="1" Margin="0,8,0,0">
@@ -1020,6 +1023,23 @@
                                     <CheckBox x:Name="SetTray" Style="{StaticResource Switch}" Content="Сворачивать в трей вместо закрытия" Margin="0,4,0,0"/>
                                     <CheckBox x:Name="SetHotKey" Style="{StaticResource Switch}" Content="Глобальный хоткей Ctrl+Alt+N (показать окно)" Margin="0,10,0,0"/>
                                     <TextBlock Text="Хоткей применится после перезапуска приложения." Foreground="{StaticResource Faint}" FontSize="11.5" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource CardBox}">
+                                <StackPanel>
+                                    <TextBlock Text="РОУТЕРЫ MIKROTIK" Style="{StaticResource Caption}"/>
+                                    <TextBlock Text="Для диагностики: DHCP и ARP ноутбука, пинг роутер → точки, журнал и порты. NetKnife ходит пользователем netknife только на чтение (создаётся кнопкой «Подготовить» через админ-доступ). Имена точек Omada берутся из DHCP." Foreground="{StaticResource Sub}" FontSize="12" Margin="0,2,0,8" TextWrapping="Wrap"/>
+                                    <ListBox x:Name="SetMtList" Height="96" Background="Transparent" BorderThickness="1" BorderBrush="{StaticResource Line}" Foreground="{StaticResource Text}" FontFamily="{StaticResource MonoFont}" FontSize="12"/>
+                                    <WrapPanel Margin="0,8,0,0">
+                                        <Button x:Name="SetMtAdd" Style="{StaticResource Btn}" Padding="10,6" Margin="0,0,6,6"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE710;" Style="{StaticResource Glyph}"/><TextBlock Text="Добавить"/></StackPanel></Button>
+                                        <Button x:Name="SetMtEdit" Style="{StaticResource Btn}" Padding="10,6" Margin="0,0,6,6"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE70F;" Style="{StaticResource Glyph}"/><TextBlock Text="Изменить"/></StackPanel></Button>
+                                        <Button x:Name="SetMtPrep" Style="{StaticResource AccentBtn}" Padding="10,6" Margin="0,0,6,6" ToolTip="Создать на роутере пользователя netknife (только чтение) и группы netknife-ro / netknife-rw"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72E;" Style="{StaticResource Glyph}"/><TextBlock Text="Подготовить"/></StackPanel></Button>
+                                        <Button x:Name="SetMtTest" Style="{StaticResource Btn}" Padding="10,6" Margin="0,0,6,6"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE73E;" Style="{StaticResource Glyph}"/><TextBlock Text="Проверить"/></StackPanel></Button>
+                                        <Button x:Name="SetMtAps" Style="{StaticResource Btn}" Padding="10,6" Margin="0,0,6,6" ToolTip="Точки Omada из DHCP роутера: имя, MAC, IP"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE701;" Style="{StaticResource Glyph}"/><TextBlock Text="Точки"/></StackPanel></Button>
+                                        <Button x:Name="SetMtDel" Style="{StaticResource GhostBtn}" Padding="10,6" Margin="0,0,6,6"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74D;" Style="{StaticResource Glyph}"/><TextBlock Text="Убрать"/></StackPanel></Button>
+                                    </WrapPanel>
+                                    <TextBlock x:Name="SetMtStatus" Foreground="{StaticResource Sub}" FontSize="12" TextWrapping="Wrap"/>
                                 </StackPanel>
                             </Border>
 

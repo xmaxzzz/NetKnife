@@ -157,6 +157,8 @@ function Get-WplanApName {
     param([string]$Key)
     $A = $script:Wplan.Aps[$Key]
     if ($A -and $A.Name) { return $A.Name }
+    $Mt = $(if ($script:Settings.MtApNames) { "$($script:Settings.MtApNames[$Key])" } else { "" })
+    if ($Mt) { return $Mt }
     return "AP " + (($Key -split ':' | Select-Object -Last 2) -join ':')
 }
 

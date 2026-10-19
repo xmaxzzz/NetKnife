@@ -39,6 +39,8 @@ function Initialize-SettingsPage {
     $Ui.SetUpdAuto.IsChecked = [bool]$script:Settings.AutoUpdateCheck
     $Ui.SetUpdAuto.Add_Click({ $script:Settings.AutoUpdateCheck = [bool]$Ui.SetUpdAuto.IsChecked; Save-Settings })
 
+    Initialize-MtSettings
+
     $Ui.SetDataPath.Text = $script:DataDir
     $Ui.SetOpenData.Add_Click({ Start-Process explorer.exe -ArgumentList (Quote-Arg $script:DataDir) })
     $Ui.SetOpenLog.Add_Click({
