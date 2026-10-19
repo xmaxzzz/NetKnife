@@ -290,6 +290,11 @@ function Start-WhAi {
 function Show-WifiHub {
     if (-not $script:WhInit) { return }
     Set-WhStep $script:WhStep
+    $W = $(if ($script:Wplan) { Get-WhState } else { $null })
+    if ($W -and $W.RouterId -and -not $script:WhApsFresh) {
+        $R = Get-MtRouter $W.RouterId
+        if ($R -and $R.Ready) { $script:WhApsFresh = $true; Start-MtApRefresh $R { param($A) if ($script:WhStep -eq 1) { Update-WhPrep } } }
+    }
 }
 
 function Initialize-WifiHub {

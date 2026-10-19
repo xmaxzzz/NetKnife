@@ -38,6 +38,7 @@ $script:MtExecBody = {
         $Psi.ArgumentList.Add($Script)
         $Psi.UseShellExecute = $false; $Psi.CreateNoWindow = $true
         $Psi.RedirectStandardOutput = $true; $Psi.RedirectStandardError = $true
+        $Psi.StandardOutputEncoding = [Text.Encoding]::UTF8; $Psi.StandardErrorEncoding = [Text.Encoding]::UTF8   # RouterOS sends raw UTF-8
         $P = [System.Diagnostics.Process]::Start($Psi)
         $O = $P.StandardOutput.ReadToEndAsync(); $E = $P.StandardError.ReadToEndAsync()
         if (-not $P.WaitForExit($TimeoutMs)) { try { $P.Kill() } catch { } }
@@ -83,6 +84,7 @@ function ConvertFrom-MtLeases {
         $Hn = "$($L.'host-name')"
         if ($Hn -notmatch $script:MtApPattern) { continue }
         $Name = ($Hn -replace $script:MtApPattern, '').Trim()
+        if ($Name -match '^\(\d+\)$') { $Name = "AP $("$($L.'mac-address')".ToUpper().Substring(12)) $Name" }
         $Aps += [ordered]@{ Mac = "$($L.'mac-address')".ToUpper(); Ip = "$($L.address)"; Name = $(if ($Name) { $Name } else { "" }); Status = "$($L.status)"; LastSeen = "$($L.'last-seen')"; Server = "$($L.server)"; Key = (Get-MtApKey "$($L.'mac-address')") }
     }
     return $Aps
@@ -98,6 +100,14 @@ function Update-MtApNames {
     $script:Settings.MtAps[$R.Id] = @($Aps)
     Save-Settings
     return $N
+}
+
+function Repair-MtApCache {
+    $Bad = '[╨╤][\u2500-\u257F\u0400-\u04FF]'
+    $Ch = $false
+    if ($script:Settings.MtApNames) { foreach ($K in @($script:Settings.MtApNames.Keys)) { if ("$($script:Settings.MtApNames[$K])" -match $Bad) { $script:Settings.MtApNames.Remove($K); $Ch = $true } } }
+    if ($script:Settings.MtAps) { foreach ($Id in @($script:Settings.MtAps.Keys)) { foreach ($A in @($script:Settings.MtAps[$Id])) { if ($A -and "$($A.Name)" -match $Bad) { $A.Name = ""; $Ch = $true } } } }
+    if ($Ch) { Save-Settings }
 }
 
 function Get-MtApName {
@@ -211,6 +221,7 @@ $script:MtStreamBody = {
     $Psi.ArgumentList.Add($Script)
     $Psi.UseShellExecute = $false; $Psi.CreateNoWindow = $true
     $Psi.RedirectStandardOutput = $true; $Psi.RedirectStandardError = $true; $Psi.RedirectStandardInput = $true
+    $Psi.StandardOutputEncoding = [Text.Encoding]::UTF8; $Psi.StandardErrorEncoding = [Text.Encoding]::UTF8
     try { $P = [System.Diagnostics.Process]::Start($Psi) } catch { $Q.Enqueue(@{ Type = "mts"; Kind = $Kind; Error = "$($_.Exception.Message)" }); return }
     $ErrTask = $P.StandardError.ReadToEndAsync()
     $LineTask = $P.StandardOutput.ReadLineAsync()
@@ -376,6 +387,7 @@ function Show-MtApsDialog {
 
 function Initialize-MtSettings {
     if (-not $Ui.SetMtList) { return }
+    try { Repair-MtApCache } catch { Write-AppLog "mt cache repair: $_" }
     Refresh-MtList
     $Ui.SetMtAdd.Add_Click({ Show-MtConnectDialog $null })
     $Ui.SetMtFind.Add_Click({ Start-MtDiscovery })
