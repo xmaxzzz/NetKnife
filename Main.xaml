@@ -797,7 +797,7 @@
 
                     <!-- WI-FI PLAN -->
                     <Grid x:Name="PageWplan" Visibility="Collapsed" Margin="26,0,18,14">
-                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="230"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="170"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                         <Border Style="{StaticResource CardBox}" Padding="16,14">
                             <StackPanel>
                                 <Grid>
@@ -815,9 +815,34 @@
                                     </StackPanel>
                                 </Grid>
                                 <Grid Margin="0,12,0,0">
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                    <TextBox x:Name="WpRoom" Style="{StaticResource Field}" Height="40" FontSize="14.5" Tag="где стоишь: Кухня, Спальня 2, Лестница 2 эт…  (Enter — замер)"/>
-                                    <Button x:Name="WpMeasure" Grid.Column="1" Style="{StaticResource AccentBtn}" Padding="18,9" Margin="10,0,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="220"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="СЕРИЯ ЗАМЕРОВ" Style="{StaticResource Caption}"/>
+                                        <DockPanel>
+                                            <Button x:Name="WpSeriesPick" DockPanel.Dock="Right" Style="{StaticResource IconBtn}" Content="&#xE70D;" Width="30" Height="36" Margin="4,0,0,0" ToolTip="Серии: Исходная, После правок 1… (+ новая)"/>
+                                            <TextBox x:Name="WpSeries" Style="{StaticResource Field}" Tag="Исходная"/>
+                                        </DockPanel>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Bottom">
+                                        <StackPanel Margin="0,0,10,0" ToolTip="Насколько телефон слышит хуже ноутбука. Весь расчёт — в dBm телефона.">
+                                            <TextBlock Text="ПОПРАВКА КЛИЕНТА, DB" Style="{StaticResource Caption}"/>
+                                            <TextBox x:Name="WpOffset" Style="{StaticResource MonoField}" Width="130"/>
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,10,0" ToolTip="Выше — телефон не докричится до точки (он сам ~14–17 dBm)">
+                                            <TextBlock Text="ПОТОЛОК 5 ГГЦ" Style="{StaticResource Caption}"/>
+                                            <TextBox x:Name="WpCap5" Style="{StaticResource MonoField}" Width="110"/>
+                                        </StackPanel>
+                                        <StackPanel ToolTip="Плюс правило: на 3 dB ниже 5 ГГц той же точки">
+                                            <TextBlock Text="ПОТОЛОК 2.4 ГГЦ" Style="{StaticResource Caption}"/>
+                                            <TextBox x:Name="WpCap24" Style="{StaticResource MonoField}" Width="110"/>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Grid>
+                                <Grid Margin="0,12,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <TextBox x:Name="WpRoom" Style="{StaticResource Field}" Height="40" FontSize="14.5" Tag="где стоишь: Кухня, Спальня 2… · переход: Кухня ↔ Холл  (Enter — замер)"/>
+                                    <CheckBox x:Name="WpTrans" Grid.Column="1" Style="{StaticResource Switch}" Content="Переход" Margin="12,0,0,0" VerticalAlignment="Center" ToolTip="Дверь/коридор между зонами двух точек: проверяется, есть ли куда роумиться"/>
+                                    <Button x:Name="WpMeasure" Grid.Column="2" Style="{StaticResource AccentBtn}" Padding="18,9" Margin="12,0,0,0">
                                         <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE707;" Style="{StaticResource Glyph}"/><TextBlock Text="Замер здесь"/></StackPanel>
                                     </Button>
                                 </Grid>
@@ -828,7 +853,7 @@
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                             <Border Style="{StaticResource CardBox}" Padding="10,10" Margin="0">
                                 <DockPanel>
-                                    <TextBlock DockPanel.Dock="Top" Text="ЗАМЕРЫ  (ПКМ — удалить)" Style="{StaticResource Caption}" Margin="6,0,0,4"/>
+                                    <TextBlock DockPanel.Dock="Top" Text="ЗАМЕРЫ ТЕКУЩЕЙ СЕРИИ  (ПКМ — комната/переход, удалить)" Style="{StaticResource Caption}" Margin="6,0,0,4" TextTrimming="CharacterEllipsis"/>
                                     <TextBlock x:Name="WpPointsEmpty" DockPanel.Dock="Top" Text="Пока нет замеров." Foreground="{StaticResource Faint}" Margin="6,4,0,0"/>
                                     <ListView x:Name="WpPoints" Style="{StaticResource List}" ItemTemplate="{StaticResource WpPointRowT}"/>
                                 </DockPanel>
@@ -849,8 +874,14 @@
                                     <Button x:Name="WpCopySheet" Style="{StaticResource Btn}" Padding="12,7" Margin="8,0,0,0" ToolTip="Таблица точка → диапазон → канал → ширина → мощность (вставляется в Excel)">
                                         <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8A5;" Style="{StaticResource Glyph}"/><TextBlock Text="Лист для Omada"/></StackPanel>
                                     </Button>
-                                    <Button x:Name="WpCopy" Style="{StaticResource Btn}" Padding="12,7" Margin="8,0,0,0">
-                                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8C8;" Style="{StaticResource Glyph}"/><TextBlock Text="Копировать отчёт"/></StackPanel>
+                                    <Button x:Name="WpCompare" Style="{StaticResource Btn}" Padding="12,7" Margin="8,0,0,0" ToolTip="Исходная серия против текущей: было/стало по каждому месту">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8CE;" Style="{StaticResource Glyph}"/><TextBlock Text="Сравнить серии"/></StackPanel>
+                                    </Button>
+                                    <Button x:Name="WpHtml" Style="{StaticResource Btn}" Padding="12,7" Margin="8,0,0,0" ToolTip="Отчёт объекта в браузере: матрицы до/после, настройки точек, проверочный обход">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8A1;" Style="{StaticResource Glyph}"/><TextBlock Text="HTML-отчёт"/></StackPanel>
+                                    </Button>
+                                    <Button x:Name="WpCopy" Style="{StaticResource GhostBtn}" Padding="12,7" Margin="8,0,0,0" ToolTip="Копировать текст отчёта">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8C8;" Style="{StaticResource Glyph}"/><TextBlock Text="Копировать"/></StackPanel>
                                     </Button>
                                     <Button x:Name="WpAi" Style="{StaticResource Btn}" Padding="12,7" Margin="8,0,0,0" ToolTip="Отправить замеры и расчёт в Claude (твой API-ключ) за проверкой и советом">
                                         <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE99A;" Style="{StaticResource Glyph}"/><TextBlock Text="Совет ИИ"/></StackPanel>
