@@ -307,6 +307,29 @@
             </DataTemplate.Triggers>
         </DataTemplate>
 
+        <DataTemplate x:Key="ConnRowT">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="22"/><ColumnDefinition Width="*"/><ColumnDefinition Width="190"/><ColumnDefinition Width="150"/><ColumnDefinition Width="90"/><ColumnDefinition Width="50"/>
+                </Grid.ColumnDefinitions>
+                <Ellipse x:Name="Dot" Width="9" Height="9" Fill="{StaticResource Ok}" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,10,0">
+                    <TextBlock x:Name="HostT" Text="{Binding Host}" FontSize="13.5" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Text="{Binding Proc}" Style="{StaticResource SubText}" FontSize="11.5" Margin="0,1,0,0"/>
+                </StackPanel>
+                <TextBlock Grid.Column="2" Text="{Binding Target}" FontFamily="{StaticResource MonoFont}" FontSize="12.5" VerticalAlignment="Center"/>
+                <TextBlock x:Name="St" Grid.Column="3" Text="{Binding StatusText}" FontSize="12" Foreground="{StaticResource Ok}" VerticalAlignment="Center"/>
+                <TextBlock Grid.Column="4" Text="{Binding Seen}" FontFamily="{StaticResource MonoFont}" FontSize="12" Foreground="{StaticResource Faint}" VerticalAlignment="Center"/>
+                <TextBlock Grid.Column="5" Text="{Binding Count}" FontFamily="{StaticResource MonoFont}" FontSize="12" Foreground="{StaticResource Faint}" VerticalAlignment="Center"/>
+            </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding HasName}" Value="False"><Setter TargetName="HostT" Property="Foreground" Value="{StaticResource Faint}"/></DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="fail"><Setter TargetName="Dot" Property="Fill" Value="{StaticResource Fail}"/><Setter TargetName="St" Property="Foreground" Value="{StaticResource Fail}"/></DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="wait"><Setter TargetName="Dot" Property="Fill" Value="{StaticResource Warn}"/><Setter TargetName="St" Property="Foreground" Value="{StaticResource Warn}"/></DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="none"><Setter TargetName="Dot" Property="Fill" Value="{StaticResource Faint}"/><Setter TargetName="St" Property="Foreground" Value="{StaticResource Faint}"/></DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
         <DataTemplate x:Key="DnsRowT">
             <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="4"/><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
@@ -376,6 +399,9 @@
                 </RadioButton>
                 <RadioButton x:Name="NavVpn" Style="{StaticResource Nav}">
                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xEA18;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="VPN"/></StackPanel>
+                </RadioButton>
+                <RadioButton x:Name="NavConns" Style="{StaticResource Nav}">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8CE;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Соединения"/></StackPanel>
                 </RadioButton>
                 <TextBlock Text="SSH" Style="{StaticResource Caption}" Margin="12,16,0,4"/>
                 <RadioButton x:Name="NavHosts" Style="{StaticResource Nav}" IsChecked="True">
@@ -687,6 +713,54 @@
                             <WrapPanel x:Name="TermTabs"/>
                         </DockPanel>
                         <Border x:Name="TermHostArea" Background="#FF0C0C0C" CornerRadius="10" ClipToBounds="True"/>
+                    </DockPanel>
+
+                    <!-- CONNECTIONS -->
+                    <DockPanel x:Name="PageConns" Visibility="Collapsed" Margin="26,0,18,14">
+                        <Border DockPanel.Dock="Top" Style="{StaticResource CardBox}" Padding="16,14">
+                            <StackPanel>
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <DockPanel>
+                                        <Button x:Name="ConnProcPick" DockPanel.Dock="Right" Style="{StaticResource IconBtn}" Content="&#xE70D;" Width="34" Height="40" Margin="4,0,0,0" ToolTip="Выбрать из запущенных (сверху — у кого есть соединения)"/>
+                                        <TextBox x:Name="ConnProc" Style="{StaticResource MonoField}" Height="40" FontSize="14.5" Tag="процесс: ComposerPro, Composer*, chrome… (маска; дочерние процессы тоже)"/>
+                                    </DockPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="10,0,0,0">
+                                        <Button x:Name="ConnStart" Style="{StaticResource AccentBtn}" Padding="18,9">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE768;" Style="{StaticResource Glyph}"/><TextBlock Text="Следить"/></StackPanel>
+                                        </Button>
+                                        <Button x:Name="ConnStop" Style="{StaticResource Btn}" Padding="14,9" Margin="8,0,0,0" IsEnabled="False">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE71A;" Style="{StaticResource Glyph}"/><TextBlock Text="Стоп"/></StackPanel>
+                                        </Button>
+                                        <Button x:Name="ConnClear" Style="{StaticResource GhostBtn}" Padding="12,9" Margin="8,0,0,0" ToolTip="Очистить список">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74D;" Style="{StaticResource Glyph}"/><TextBlock Text="Очистить"/></StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                </Grid>
+                                <TextBlock x:Name="ConnProcs" Foreground="{StaticResource Faint}" FontSize="12" Margin="2,8,0,0" TextWrapping="Wrap" Text="Запусти слежку, потом в программе повтори действие (проверить обновления и т.п.) — список наполнится."/>
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <CheckBox x:Name="ConnHideLan" Style="{StaticResource Switch}" IsChecked="True" Content="Скрыть локальные" Margin="0,0,14,0"/>
+                                        <CheckBox x:Name="ConnOnlyFail" Style="{StaticResource Switch}" Content="Копировать только неудачные" ToolTip="Экспорт берёт только адреса, куда программа не смогла подключиться"/>
+                                    </StackPanel>
+                                    <TextBlock x:Name="ConnSummary" Grid.Column="1" Foreground="{StaticResource Sub}" FontSize="12" VerticalAlignment="Center" Margin="16,0,0,0" TextTrimming="CharacterEllipsis"/>
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal">
+                                        <Button x:Name="ConnCopyDomains" Style="{StaticResource Btn}" Padding="10,5">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8C8;" Style="{StaticResource Glyph}" FontSize="12"/><TextBlock Text="Домены"/></StackPanel>
+                                        </Button>
+                                        <Button x:Name="ConnCopyIps" Style="{StaticResource Btn}" Padding="10,5" Margin="6,0,0,0">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8C8;" Style="{StaticResource Glyph}" FontSize="12"/><TextBlock Text="IP"/></StackPanel>
+                                        </Button>
+                                        <TextBox x:Name="ConnFwd" Style="{StaticResource MonoField}" Width="130" Height="30" FontSize="12" Margin="10,0,0,0" Tag="DNS за VPN" ToolTip="forward-to для MikroTik: DNS, доступный через туннель"/>
+                                        <Button x:Name="ConnCopyMt" Style="{StaticResource Btn}" Padding="10,5" Margin="6,0,0,0">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE943;" Style="{StaticResource Glyph}" FontSize="12"/><TextBlock Text="MikroTik"/><TextBlock Text="&#xE70D;" Style="{StaticResource Glyph}" FontSize="9" Margin="6,1,0,0"/></StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                        <ListView x:Name="ConnList" Style="{StaticResource List}" ItemTemplate="{StaticResource ConnRowT}" Margin="-10,8,0,0"/>
                     </DockPanel>
 
                     <!-- SETTINGS -->

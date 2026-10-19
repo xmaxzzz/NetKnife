@@ -1,4 +1,4 @@
-﻿# NetKnife — SSH hosts, keys, tunnels + network toolbox (scanner, ports, ping/trace, DNS, monitor, speed test).
+# NetKnife — SSH hosts, keys, tunnels + network toolbox (scanner, ports, ping/trace, DNS, monitor, speed test).
 # Run: pwsh -STA -File NetKnife.ps1   (shortcut uses conhost --headless to hide the console)
 #
 # Global: Ctrl+Alt+N show/hide window (tray icon; close button hides to tray, exit via tray menu)
@@ -30,6 +30,7 @@ function Write-AppLog {
 . (Join-Path $PSScriptRoot "pages\Hosts.ps1")
 . (Join-Path $PSScriptRoot "pages\Tunnels.ps1")
 . (Join-Path $PSScriptRoot "pages\Vpn.ps1")
+. (Join-Path $PSScriptRoot "pages\Conns.ps1")
 . (Join-Path $PSScriptRoot "pages\Monitor.ps1")
 . (Join-Path $PSScriptRoot "pages\Wifi.ps1")
 . (Join-Path $PSScriptRoot "pages\Terminal.ps1")
@@ -99,6 +100,7 @@ $script:Pages = [ordered]@{
     wifi  = @{ Panel = "PageWifi";  Nav = "NavWifi";  Title = "Wi-Fi";              Sub = { Get-WifiSub };  Focus = "WifiScan" }
     monitor = @{ Panel = "PageMonitor"; Nav = "NavMonitor"; Title = "Монитор";      Sub = { Get-MonitorSub }; Focus = "MonTarget" }
     vpn   = @{ Panel = "PageVpn";   Nav = "NavVpn";   Title = "VPN";                Sub = { Get-VpnSub };   Focus = "VpnList" }
+    conns = @{ Panel = "PageConns"; Nav = "NavConns"; Title = "Соединения программ"; Sub = { Get-ConnsSub }; Focus = "ConnProc" }
     hosts = @{ Panel = "PageHosts"; Nav = "NavHosts"; Title = "Хосты";              Sub = { Get-HostsSub }; Focus = "HostSearch" }
     keys  = @{ Panel = "PageKeys";  Nav = "NavKeys";  Title = "Ключи";              Sub = { Get-KeysSub };  Focus = "KeySearch" }
     tunnels = @{ Panel = "PageTunnels"; Nav = "NavTunnels"; Title = "Туннели";      Sub = { Get-TunnelsSub }; Focus = "TunnelList" }
@@ -259,6 +261,7 @@ $script:LocalNets = @(Get-LocalNets)
 Initialize-HostsPage
 Initialize-TunnelsPage
 Initialize-VpnPage
+Initialize-ConnsPage
 Initialize-TerminalPage
 Initialize-MonitorPage
 Initialize-WifiPage
@@ -323,6 +326,7 @@ $Win.Add_Closing({
     foreach ($W in @($script:Workers)) { $W.Ctl.Stop = $true }
     Stop-AllTunnels
     Stop-Vpn -Quiet
+    Stop-Worker "conns"
     Stop-TermSession
     Stop-ChildJob
     Save-TunnelPids
