@@ -34,6 +34,7 @@ function Write-AppLog {
 . (Join-Path $PSScriptRoot "lib\WlanApi.ps1")
 . (Join-Path $PSScriptRoot "lib\Ai.ps1")
 . (Join-Path $PSScriptRoot "pages\WifiPlan.ps1")
+. (Join-Path $PSScriptRoot "pages\Roam.ps1")
 . (Join-Path $PSScriptRoot "pages\Monitor.ps1")
 . (Join-Path $PSScriptRoot "pages\Wifi.ps1")
 . (Join-Path $PSScriptRoot "pages\Terminal.ps1")
@@ -102,6 +103,7 @@ $script:Pages = [ordered]@{
     dns   = @{ Panel = "PageDns";   Nav = "NavDns";   Title = "DNS";                Sub = { Get-DnsSub };   Focus = "DnsName" }
     wifi  = @{ Panel = "PageWifi";  Nav = "NavWifi";  Title = "Wi-Fi";              Sub = { Get-WifiSub };  Focus = "WifiScan" }
     wplan = @{ Panel = "PageWplan"; Nav = "NavWplan"; Title = "Wi-Fi план";         Sub = { Get-WplanSub }; Focus = "WpRoom" }
+    roam  = @{ Panel = "PageRoam";  Nav = "NavRoam";  Title = "Монитор роуминга";   Sub = { Get-RoamSub };  Focus = "RoamStart" }
     monitor = @{ Panel = "PageMonitor"; Nav = "NavMonitor"; Title = "Монитор";      Sub = { Get-MonitorSub }; Focus = "MonTarget" }
     vpn   = @{ Panel = "PageVpn";   Nav = "NavVpn";   Title = "VPN";                Sub = { Get-VpnSub };   Focus = "VpnList" }
     conns = @{ Panel = "PageConns"; Nav = "NavConns"; Title = "Соединения программ"; Sub = { Get-ConnsSub }; Focus = "ConnProc" }
@@ -267,6 +269,7 @@ Initialize-TunnelsPage
 Initialize-VpnPage
 Initialize-ConnsPage
 Initialize-WifiPlanPage
+Initialize-RoamPage
 Initialize-TerminalPage
 Initialize-MonitorPage
 Initialize-WifiPage
@@ -332,6 +335,7 @@ $Win.Add_Closing({
     Stop-AllTunnels
     Stop-Vpn -Quiet
     Stop-Worker "conns"
+    try { Stop-RoamMonitor -Quiet } catch { }
     Stop-TermSession
     Stop-ChildJob
     Save-TunnelPids

@@ -98,3 +98,115 @@ namespace NetKnife {
 }
 '@
 }
+
+# Current association (which AP the laptop is on right now) + fast probes for the roaming monitor.
+# WLAN_CONNECTION_ATTRIBUTES offsets: isState@0, profile@8, SSID@520, BSSID@560, quality@576, rx@580, tx@584 (kbps).
+if (-not ("NetKnife.WlanCur" -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
+using System.Runtime.InteropServices;
+using System.Threading.Tasks;
+
+namespace NetKnife {
+    public class CurInfo {
+        public int State; public string Ssid = ""; public string Bssid = ""; public int Rssi; public int Quality;
+        public int Channel; public int RxKbps; public int TxKbps; public string Iface = "";
+    }
+
+    public static class WlanCur {
+        [DllImport("wlanapi.dll")] static extern uint WlanOpenHandle(uint ver, IntPtr res, out uint negotiated, out IntPtr h);
+        [DllImport("wlanapi.dll")] static extern uint WlanCloseHandle(IntPtr h, IntPtr res);
+        [DllImport("wlanapi.dll")] static extern uint WlanEnumInterfaces(IntPtr h, IntPtr res, out IntPtr list);
+        [DllImport("wlanapi.dll")] static extern uint WlanQueryInterface(IntPtr h, ref Guid iface, int op, IntPtr res, out int size, out IntPtr data, out int type);
+        [DllImport("wlanapi.dll")] static extern void WlanFreeMemory(IntPtr p);
+
+        static IntPtr handle = IntPtr.Zero;
+        static readonly object gate = new object();
+
+        static int QueryInt(ref Guid g, int op, int dflt) {
+            int size, type; IntPtr data;
+            if (WlanQueryInterface(handle, ref g, op, IntPtr.Zero, out size, out data, out type) != 0) return dflt;
+            try { return Marshal.ReadInt32(data); } finally { WlanFreeMemory(data); }
+        }
+
+        // State: 1 connected, 3 disconnecting, 4 disconnected, 5 associating, 6 discovering, 7 authenticating
+        public static CurInfo Current() {
+            lock (gate) {
+                var c = new CurInfo { State = 4 };
+                if (handle == IntPtr.Zero) { uint neg; if (WlanOpenHandle(2, IntPtr.Zero, out neg, out handle) != 0) { handle = IntPtr.Zero; return c; } }
+                IntPtr il;
+                if (WlanEnumInterfaces(handle, IntPtr.Zero, out il) != 0) { WlanCloseHandle(handle, IntPtr.Zero); handle = IntPtr.Zero; return c; }
+                try {
+                    int n = Marshal.ReadInt32(il, 0);
+                    for (int i = 0; i < n; i++) {
+                        IntPtr p = il + 8 + i * 532;
+                        byte[] gb = new byte[16]; Marshal.Copy(p, gb, 0, 16);
+                        Guid g = new Guid(gb);
+                        int state = Marshal.ReadInt32(p, 528);
+                        if (i == 0 || state == 1) { c.State = state; c.Iface = Marshal.PtrToStringUni(p + 16); }
+                        if (state != 1) continue;
+                        int size, type; IntPtr data;
+                        if (WlanQueryInterface(handle, ref g, 7, IntPtr.Zero, out size, out data, out type) == 0) {   // current_connection
+                            try {
+                                int slen = Math.Min(Marshal.ReadInt32(data, 520), 32);
+                                byte[] sb = new byte[32]; Marshal.Copy(data + 524, sb, 0, 32);
+                                c.Ssid = System.Text.Encoding.UTF8.GetString(sb, 0, slen);
+                                byte[] mac = new byte[6]; Marshal.Copy(data + 560, mac, 0, 6);
+                                c.Bssid = BitConverter.ToString(mac).Replace('-', ':');
+                                c.Quality = Marshal.ReadInt32(data, 576);
+                                c.RxKbps = Marshal.ReadInt32(data, 580);
+                                c.TxKbps = Marshal.ReadInt32(data, 584);
+                            } finally { WlanFreeMemory(data); }
+                        }
+                        c.Channel = QueryInt(ref g, 8, 0);                                  // channel_number
+                        c.Rssi = QueryInt(ref g, 0x10000102, c.Quality / 2 - 100);          // rssi (dBm), fallback from quality
+                        break;
+                    }
+                } finally { WlanFreeMemory(il); }
+                return c;
+            }
+        }
+    }
+
+    public static class Probe {
+        [DllImport("iphlpapi.dll")] static extern int SendARP(uint dest, uint src, byte[] mac, ref uint len);
+
+        public static string ArpMac(string ip) {
+            try {
+                uint d = BitConverter.ToUInt32(IPAddress.Parse(ip).GetAddressBytes(), 0);
+                byte[] m = new byte[6]; uint l = 6;
+                if (SendARP(d, 0, m, ref l) != 0 || l == 0) return "";
+                return BitConverter.ToString(m, 0, (int)l).Replace('-', ':');
+            } catch { return ""; }
+        }
+        public static Task<string> ArpMacAsync(string ip) { return Task.Run(() => ArpMac(ip)); }
+
+        // Raw UDP query straight to the server (bypasses the Windows DNS cache). ms on any answer, -1 on timeout.
+        public static int Dns(string server, string name, int timeoutMs) {
+            var sw = Stopwatch.StartNew();
+            try {
+                using (var u = new UdpClient()) {
+                    u.Client.ReceiveTimeout = timeoutMs;
+                    var rnd = new Random();
+                    ushort id = (ushort)rnd.Next(1, 65535);
+                    var pkt = new System.Collections.Generic.List<byte> { (byte)(id >> 8), (byte)id, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0 };
+                    foreach (var label in name.Split('.')) { pkt.Add((byte)label.Length); pkt.AddRange(System.Text.Encoding.ASCII.GetBytes(label)); }
+                    pkt.AddRange(new byte[] { 0, 0, 1, 0, 1 });
+                    u.Send(pkt.ToArray(), pkt.Count, new IPEndPoint(IPAddress.Parse(server), 53));
+                    var ep = new IPEndPoint(IPAddress.Any, 0);
+                    while (sw.ElapsedMilliseconds < timeoutMs) {
+                        var r = u.Receive(ref ep);
+                        if (r.Length > 3 && r[0] == (byte)(id >> 8) && r[1] == (byte)id) return (int)sw.ElapsedMilliseconds;
+                    }
+                }
+            } catch { }
+            return -1;
+        }
+        public static Task<int> DnsAsync(string server, string name, int timeoutMs) { return Task.Run(() => Dns(server, name, timeoutMs)); }
+    }
+}
+'@
+}

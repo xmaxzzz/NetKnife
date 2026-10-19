@@ -359,6 +359,41 @@
             </DataTemplate.Triggers>
         </DataTemplate>
 
+        <DataTemplate x:Key="RoamEvRowT">
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="18"/><ColumnDefinition Width="66"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Ellipse x:Name="Dot" Width="8" Height="8" Fill="{StaticResource Faint}" VerticalAlignment="Top" Margin="0,6,0,0" HorizontalAlignment="Left"/>
+                <TextBlock Grid.Column="1" Text="{Binding Time}" FontFamily="{StaticResource MonoFont}" FontSize="12" Foreground="{StaticResource Faint}" Margin="0,2,0,0"/>
+                <StackPanel Grid.Column="2">
+                    <TextBlock x:Name="T" Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding Detail}" Style="{StaticResource SubText}" FontSize="11.5" TextWrapping="Wrap" Margin="0,1,0,0"/>
+                </StackPanel>
+            </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Kind}" Value="ok"><Setter TargetName="Dot" Property="Fill" Value="{StaticResource Ok}"/></DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="warn"><Setter TargetName="Dot" Property="Fill" Value="{StaticResource Warn}"/><Setter TargetName="T" Property="Foreground" Value="{StaticResource Warn}"/></DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="fail"><Setter TargetName="Dot" Property="Fill" Value="{StaticResource Fail}"/><Setter TargetName="T" Property="Foreground" Value="{StaticResource Fail}"/></DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="wait"><Setter TargetName="Dot" Property="Fill" Value="{StaticResource Accent}"/></DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <DataTemplate x:Key="RoamApRowT">
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Ellipse x:Name="Dot" Width="9" Height="9" Fill="{StaticResource Ok}" VerticalAlignment="Top" Margin="0,6,0,0" HorizontalAlignment="Left"/>
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="{Binding Name}" FontSize="13.5" FontWeight="SemiBold"/>
+                    <TextBlock Text="{Binding Line}" FontFamily="{StaticResource MonoFont}" FontSize="11.5" Foreground="{StaticResource Sub}" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="V" Text="{Binding Verdict}" FontSize="11.5" Foreground="{StaticResource Ok}" TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding Meta}" FontFamily="{StaticResource MonoFont}" FontSize="10.5" Foreground="{StaticResource Faint}"/>
+                </StackPanel>
+            </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Kind}" Value="warn"><Setter TargetName="Dot" Property="Fill" Value="{StaticResource Warn}"/><Setter TargetName="V" Property="Foreground" Value="{StaticResource Warn}"/></DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="fail"><Setter TargetName="Dot" Property="Fill" Value="{StaticResource Fail}"/><Setter TargetName="V" Property="Foreground" Value="{StaticResource Fail}"/></DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
         <DataTemplate x:Key="DnsRowT">
             <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="4"/><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
@@ -425,6 +460,9 @@
                 </RadioButton>
                 <RadioButton x:Name="NavWplan" Style="{StaticResource Nav}">
                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE707;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Wi-Fi план"/></StackPanel>
+                </RadioButton>
+                <RadioButton x:Name="NavRoam" Style="{StaticResource Nav}">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8AB;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Роуминг"/></StackPanel>
                 </RadioButton>
                 <RadioButton x:Name="NavMonitor" Style="{StaticResource Nav}">
                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9D2;" Style="{StaticResource Glyph}" Margin="0,0,12,0"/><TextBlock Text="Монитор"/></StackPanel>
@@ -890,6 +928,74 @@
                                 </StackPanel>
                                 <TextBox x:Name="WpReport" Style="{StaticResource Code}" FontSize="12" TextWrapping="NoWrap" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Text=""/>
                             </DockPanel>
+                        </Border>
+                    </Grid>
+
+                    <!-- ROAMING MONITOR -->
+                    <Grid x:Name="PageRoam" Visibility="Collapsed" Margin="26,0,18,14">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="200"/></Grid.RowDefinitions>
+                        <Border Style="{StaticResource CardBox}" Padding="16,14">
+                            <StackPanel>
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock x:Name="RoamNowAp" Text="—" FontFamily="{StaticResource DisplayFont}" FontSize="20" FontWeight="SemiBold"/>
+                                        <TextBlock x:Name="RoamNowMeta" Foreground="{StaticResource Sub}" FontFamily="{StaticResource MonoFont}" FontSize="11.5" Margin="0,3,0,0" TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Border x:Name="RoamGwPill" Style="{StaticResource Pill}"><TextBlock x:Name="RoamGwText" Text="шлюз —" FontSize="12" FontFamily="{StaticResource MonoFont}"/></Border>
+                                        <Border x:Name="RoamNetPill" Style="{StaticResource Pill}" Margin="6,0,0,0"><TextBlock x:Name="RoamNetText" Text="интернет —" FontSize="12" FontFamily="{StaticResource MonoFont}"/></Border>
+                                        <Border x:Name="RoamDnsPill" Style="{StaticResource Pill}" Margin="6,0,0,0"><TextBlock x:Name="RoamDnsText" Text="DNS —" FontSize="12" FontFamily="{StaticResource MonoFont}"/></Border>
+                                    </StackPanel>
+                                </Grid>
+                                <Grid Margin="0,12,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button x:Name="RoamStart" Style="{StaticResource AccentBtn}" Padding="18,9">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE768;" Style="{StaticResource Glyph}"/><TextBlock Text="Старт"/></StackPanel>
+                                        </Button>
+                                        <Button x:Name="RoamStop" Style="{StaticResource Btn}" Padding="14,9" Margin="8,0,0,0" IsEnabled="False">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE71A;" Style="{StaticResource Glyph}"/><TextBlock Text="Стоп и диагноз"/></StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock Text="Интернет (ICMP):" Foreground="{StaticResource Sub}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <TextBox x:Name="RoamTargets" Style="{StaticResource MonoField}" Width="220" Height="32" FontSize="12.5" ToolTip="Адреса для проверки интернета; успех любого = интернет есть"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal">
+                                        <Button x:Name="RoamDiagBtn" Style="{StaticResource Btn}" Padding="12,7">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9D9;" Style="{StaticResource Glyph}"/><TextBlock Text="Диагноз"/></StackPanel>
+                                        </Button>
+                                        <Button x:Name="RoamAi" Style="{StaticResource Btn}" Padding="12,7" Margin="8,0,0,0" ToolTip="Журнал и статистика в Claude за разбором причин">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE99A;" Style="{StaticResource Glyph}"/><TextBlock Text="Совет ИИ"/></StackPanel>
+                                        </Button>
+                                        <Button x:Name="RoamCopy" Style="{StaticResource GhostBtn}" Padding="12,7" Margin="8,0,0,0" ToolTip="Копировать диагноз и ленту событий">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8C8;" Style="{StaticResource Glyph}"/><TextBlock Text="Копировать"/></StackPanel>
+                                        </Button>
+                                        <Button x:Name="RoamFolder" Style="{StaticResource GhostBtn}" Padding="10,7" Margin="4,0,0,0" ToolTip="Сохранённые сессии (JSON)">
+                                            <TextBlock Text="&#xE838;" Style="{StaticResource Glyph}" Margin="0"/>
+                                        </Button>
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                        <Grid Grid.Row="1" Margin="0,8,0,0">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="3*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="2*"/></Grid.ColumnDefinitions>
+                            <Border Style="{StaticResource CardBox}" Padding="10,10" Margin="0">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Text="СОБЫТИЯ  (новые сверху)" Style="{StaticResource Caption}" Margin="6,0,0,4"/>
+                                    <ListView x:Name="RoamEvents" Style="{StaticResource List}" ItemTemplate="{StaticResource RoamEvRowT}"/>
+                                </DockPanel>
+                            </Border>
+                            <Border Grid.Column="2" Style="{StaticResource CardBox}" Padding="10,10" Margin="0">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Text="ТОЧКИ  (2×клик — имя)" Style="{StaticResource Caption}" Margin="6,0,0,4"/>
+                                    <ListView x:Name="RoamAps" Style="{StaticResource List}" ItemTemplate="{StaticResource RoamApRowT}"/>
+                                </DockPanel>
+                            </Border>
+                        </Grid>
+                        <Border Grid.Row="2" Style="{StaticResource CardBox}" Padding="12,10" Margin="0,8,0,0">
+                            <TextBox x:Name="RoamDiag" Style="{StaticResource Code}" FontSize="12" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Text="Нажми «Старт» и ходи по объекту обычным шагом, проходя зоны всех точек. Задержись там, где обычно пропадает связь. «Стоп и диагноз» — вывод по каждой точке."/>
                         </Border>
                     </Grid>
 
