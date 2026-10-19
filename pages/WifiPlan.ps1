@@ -323,6 +323,13 @@ function Get-WplanBandPlan {
         } else { $Lo[$ki] = -10; $Hi[$ki] = 3 }
     }
 
+    # an AP that serves none of the measured rooms covers rooms we have not walked yet — leave it alone
+    $Unsurveyed = @{}
+    for ($ki = 0; $ki -lt $Keys.Count; $ki++) {
+        $Serves = @($Rows | Where-Object { -not $_.Trans -and (Get-WplanTop $Before[$_.Name]).Key -eq $Keys[$ki] }).Count
+        if (-not $Serves) { $Unsurveyed[$Keys[$ki]] = $true; $Lo[$ki] = 0; $Hi[$ki] = 0 }
+    }
+
     $D = [NetKnife.WpOpt]::Optimize($Sm, $Tr, $Lo, $Hi, [double]($script:WpEdge + $script:WpAim), [double]$script:WpMargin, [double]$script:WpRoamFloor)
     # changes under 2 dB are scan noise — drop them if the bounds allow
     for ($ki = 0; $ki -lt $D.Count; $ki++) { if ([Math]::Abs($D[$ki]) -lt 2 -and 0 -ge $Lo[$ki] -and 0 -le $Hi[$ki]) { $D[$ki] = 0 } }
@@ -347,7 +354,8 @@ function Get-WplanBandPlan {
             if ($E -gt $Ex) { $Ex = $E; $ExRoom = $Rw.Name }
         }
         $Notes = @()
-        if (-not $Cell.Count) { $Notes += "нигде не основная — лишняя на $B ГГц или стоит неудачно" }
+        if ($Unsurveyed.ContainsKey($K)) { $Notes += "нет замеров в её зоне — не меняю; обойди комнаты рядом с ней" }
+        elseif (-not $Cell.Count) { $Notes += "после правок нигде не основная — проверь, нужна ли на $B ГГц" }
         if ($null -ne $Edge -and $Edge -lt $script:WpEdge) {
             $Notes += $(if ($Known.ContainsKey($K)) { "край зоны $Edge dBm — не дотягивается даже на потолке мощности, нужна точка ближе" } else { "край зоны $Edge dBm — прибавь, сколько позволяет точка (впиши текущую мощность — посчитаю точно)" })
         }
@@ -459,6 +467,8 @@ function Get-WplanReport {
     [void]$Out.AppendLine("ОБЪЕКТ: $($R.Site)   серия: $($R.Series)   замеров: $($R.Points)   мест: $($R.Rows.Count) (переходов: $(@($R.Rows | Where-Object { $_.Trans }).Count))")
     [void]$Out.AppendLine("Всё в dBm «глазами телефона» (замер ноутбука − $($O.Offset) dB). Цель: основная точка ≥ $($script:WpEdge), сосед в чужой комнате ≥ $($script:WpMargin) dB тише, в переходе вторая точка ≥ $($script:WpRoamFloor).")
     [void]$Out.AppendLine("Потолок мощности: 5 ГГц $($O.Cap5) dBm, 2.4 ГГц $($O.Cap24) dBm (и на 3 dB ниже 5 ГГц той же точки) — чтобы телефон мог ответить точке.")
+    $NAps = @($R.Bands.Values | ForEach-Object { $_.Keys } | Sort-Object -Unique).Count
+    if ($R.Rows.Count -lt 2 * $NAps) { [void]$Out.AppendLine("⚠ МАЛО ЗАМЕРОВ: $($R.Rows.Count) мест на $NAps точек. План предварительный — снижать мощность по нему рано; обойди все комнаты (минимум по 2 на точку, включая дальние).") }
     foreach ($B in @("5", "2.4")) {
         if (-not $R.Bands.Contains($B)) { continue }
         $P = $R.Bands[$B]
