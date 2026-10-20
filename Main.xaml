@@ -1129,7 +1129,7 @@
                             <Border Style="{StaticResource CardBox}">
                                 <StackPanel>
                                     <TextBlock Text="РОУТЕРЫ MIKROTIK" Style="{StaticResource Caption}"/>
-                                    <TextBlock Text="Для диагностики: DHCP и ARP ноутбука, пинг роутер → точки, журнал и порты. NetKnife ходит пользователем netknife только на чтение (создаётся кнопкой «Подготовить» через админ-доступ). Имена точек Omada берутся из DHCP." Foreground="{StaticResource Sub}" FontSize="12" Margin="0,2,0,8" TextWrapping="Wrap"/>
+                                    <TextBlock Text="Для диагностики: DHCP и ARP ноутбука, пинг роутер → точки, журнал и порты. NetKnife читает пользователем butler-service (только чтение); изменения — только пользователем butler-rw, после твоего подтверждения и с /export до изменения." Foreground="{StaticResource Sub}" FontSize="12" Margin="0,2,0,8" TextWrapping="Wrap"/>
                                     <ListBox x:Name="SetMtList" Height="96" Background="Transparent" BorderThickness="1" BorderBrush="{StaticResource Line}" Foreground="{StaticResource Text}" FontFamily="{StaticResource MonoFont}" FontSize="12"/>
                                     <WrapPanel Margin="0,8,0,0">
                                         <Button x:Name="SetMtFind" Style="{StaticResource AccentBtn}" Padding="10,6" Margin="0,0,6,6" ToolTip="Поиск MikroTik в локальной сети по MNDP, как в Winbox"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE721;" Style="{StaticResource Glyph}"/><TextBlock Text="Найти в сети"/></StackPanel></Button>
@@ -1141,6 +1141,8 @@
                                         <Button x:Name="SetMtDel" Style="{StaticResource GhostBtn}" Padding="10,6" Margin="0,0,6,6"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74D;" Style="{StaticResource Glyph}"/><TextBlock Text="Убрать"/></StackPanel></Button>
                                     </WrapPanel>
                                     <TextBlock x:Name="SetMtStatus" Foreground="{StaticResource Sub}" FontSize="12" TextWrapping="Wrap"/>
+                                    <TextBlock Text="КЛЮЧИ ДРУГИХ СИСТЕМ (helpdesk) — публичные, по одному в строке" Style="{StaticResource Caption}" Margin="2,12,0,6"/>
+                                    <TextBox x:Name="SetMtKeys" Style="{StaticResource MonoField}" Height="64" AcceptsReturn="True" TextWrapping="NoWrap" HorizontalScrollBarVisibility="Auto" VerticalContentAlignment="Top" FontSize="11.5" Tag="ssh-rsa AAAA… butler-helpdesk" ToolTip="Каждый ключ импортируется в butler-service и butler-rw вместе с ключом этого ноутбука. Комментарий ключа = key-owner на роутере."/>
                                 </StackPanel>
                             </Border>
 

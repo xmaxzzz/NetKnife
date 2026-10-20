@@ -7,10 +7,11 @@
 # AP names for the Wi-Fi planner/monitor (Omada APs register "MAC Name" as DHCP host-name).
 
 $script:MtKey = Join-Path $env:USERPROFILE ".ssh\netknife_mt"
-$script:MtUser = "butler-service"   # one service account for NetKnife and the helpdesk
+$script:MtUser = "butler-service"   # read account shared by NetKnife, the helpdesk and Claude (group butler-service-ro)
+$script:MtRwUser = "butler-rw"        # write account, same keys (group butler-service-rw); used only for confirmed changes
 $script:MtGroup = "butler-service"  # groups butler-service-ro (user) / butler-service-rw (reserved)
 $script:MtKeyOwner = "netknife-mikrotik"   # comment of NetKnife's public key = key-owner on the router
-$script:MtApPattern = '^([0-9A-Fa-f]{2}-){5}[0-9A-Fa-f]{2}'   # Omada AP DHCP host-name starts with its MAC
+$script:MtApPattern = '([0-9A-Fa-f]{2}-){5}[0-9A-Fa-f]{2}'   # Omada AP DHCP host-name contains its MAC (renamed APs: "Имя (MAC)")
 
 function Get-MtRouters { return @($script:Settings.Routers | Where-Object { $_ -and $_.Id }) }
 
@@ -23,12 +24,12 @@ function Resolve-MtPath { param([string]$P) if ($P -like "~*") { return Join-Pat
 
 # ssh argument list (ArgumentList → correct quoting of the RouterOS script)
 function Get-MtSshArgs {
-    param($R, [switch]$Admin, [int]$Timeout = 6)
-    $Key = $(if ($Admin -or -not $R.Ready) { Resolve-MtPath "$($R.AdminKey)" } else { $script:MtKey })
-    $User = $(if ($Admin -or -not $R.Ready) { "$($R.Admin)" } else { $script:MtUser })
-    return @("-i", $Key, "-p", "$($R.Port)", "-o", "BatchMode=yes", "-o", "ConnectTimeout=$Timeout", "-o", "StrictHostKeyChecking=accept-new", "-o", "ServerAliveInterval=10", "$User@$($R.Host)")
+    param($R, [switch]$Admin, [switch]$Rw, [int]$Timeout = 6)
+    $Adm = ($Admin -or -not $R.Ready)
+    $Key = $(if ($Adm) { Resolve-MtPath "$($R.AdminKey)" } else { $script:MtKey })
+    $User = $(if ($Adm) { "$($R.Admin)" } elseif ($Rw) { $script:MtRwUser } else { $script:MtUser })
+    return @("-i", $Key, "-p", "$($R.Port)", "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o", "ConnectTimeout=$Timeout", "-o", "StrictHostKeyChecking=accept-new", "-o", "ServerAliveInterval=10", "$User@$($R.Host)")
 }
-
 # one-shot command in a worker (UI stays responsive); OnResult gets @{ Code; Out; Err }
 $script:MtExecBody = {
     param($Q, $Ctl, $SshArgs, $Script, $TimeoutMs)
@@ -48,10 +49,10 @@ $script:MtExecBody = {
 }
 
 function Invoke-MtAsync {
-    param($R, [string]$Script, [scriptblock]$OnResult, [switch]$Admin, [int]$TimeoutMs = 20000, [string]$Name = "mt-exec")
+    param($R, [string]$Script, [scriptblock]$OnResult, [switch]$Admin, [switch]$Rw, [int]$TimeoutMs = 20000, [string]$Name = "mt-exec")
     if (-not $script:MtCallbacks) { $script:MtCallbacks = @{} }
     $script:MtCallbacks[$Name] = $OnResult
-    [void](Start-Worker -Name $Name -Replace -Body $script:MtExecBody -ArgList @(@(, [string[]](Get-MtSshArgs $R -Admin:$Admin)) + @($Script, $TimeoutMs)) -State @{ Name = $Name } -OnMessage {
+    [void](Start-Worker -Name $Name -Replace -Body $script:MtExecBody -ArgList @(@(, [string[]](Get-MtSshArgs $R -Admin:$Admin -Rw:$Rw)) + @($Script, $TimeoutMs)) -State @{ Name = $Name } -OnMessage {
         param($M)
         if ($M.Type -ne "mtx") { return }
         & $script:MtCallbacks[$State.Name] $M
@@ -83,8 +84,14 @@ function ConvertFrom-MtLeases {
     foreach ($L in @($Leases)) {
         $Hn = "$($L.'host-name')"
         if ($Hn -notmatch $script:MtApPattern) { continue }
-        $Name = ($Hn -replace $script:MtApPattern, '').Trim()
-        if ($Name -match '^\(\d+\)$') { $Name = "AP $("$($L.'mac-address')".ToUpper().Substring(12)) $Name" }
+        # Omada name around the MAC in any form: "MAC Имя", "Имя (MAC)", "Имя(MAC)", "(Имя) MAC"
+        $Name = (($Hn -replace $script:MtApPattern, '') -replace '\(\s*\)', '').Trim()
+        if ($Name -match '^\((.*)\)$') { $Name = $Matches[1].Trim() }
+        if (-not $Name -or $Name -match '^(\d+|нет)$') {
+            # no real name in Omada: static lease comment ("AP Кабинет") or "AP B2:D8 (2)"
+            $Cm = ("$($L.comment)" -replace '^AP\s+', '').Trim()
+            $Name = $(if ($Cm) { $Cm } else { "AP $("$($L.'mac-address')".ToUpper().Substring(12))$(if ($Name) { " ($Name)" })" })
+        }
         $Aps += [ordered]@{ Mac = "$($L.'mac-address')".ToUpper(); Ip = "$($L.address)"; Name = $(if ($Name) { $Name } else { "" }); Status = "$($L.status)"; LastSeen = "$($L.'last-seen')"; Server = "$($L.server)"; Key = (Get-MtApKey "$($L.'mac-address')") }
     }
     return $Aps
@@ -147,35 +154,48 @@ function Get-MtErrText {
 # ---------------------------------------------------------------- connecting a router (commands pasted by the user)
 
 # NetKnife never asks for admin credentials: it shows the exact commands, the user pastes them into the router's
-# terminal (Winbox → New Terminal / WebFig → Terminal) and NetKnife then checks the login as netknife.
+# terminal (Winbox → New Terminal / WebFig → Terminal) and NetKnife then checks the logins as butler-service and butler-rw.
 
-function New-MtPassword {
-    $B = [byte[]]::new(18); [System.Security.Cryptography.RandomNumberGenerator]::Fill($B)
-    return ([Convert]::ToBase64String($B) -replace '[+/=]', 'x')
+# Key registry: NetKnife's own key + public keys of other Butler systems (settings.MtExtraKeys, e.g. the helpdesk).
+# Each key goes into BOTH accounts; the key comment (info, older key-owner) identifies whose key it is.
+function Get-MtKeyRegistry {
+    $L = @([pscustomobject]@{ Key = (Get-Content "$($script:MtKey).pub" -Raw).Trim(); Owner = $script:MtKeyOwner })
+    foreach ($K in @($script:Settings.MtExtraKeys)) {
+        $P = "$K".Trim() -split '\s+'
+        if ($P.Count -ge 3 -and $P[0] -match '^ssh-(rsa|ed25519)$' -and $P[2] -ne $script:MtKeyOwner) { $L += [pscustomobject]@{ Key = "$K".Trim(); Owner = $P[2] } }
+    }
+    return $L
 }
 
 function Get-MtProvisionScript {
-    param([string]$PubKey, [string]$Password, [int]$EnableSshPort = 0)
+    param($Keys, [int]$EnableSshPort = 0)
     # read + test (ping) + ssh + api/rest-api for future REST; explicit denials for everything that changes state
     $Ro = "read,test,ssh,api,rest-api,!local,!telnet,!ftp,!reboot,!write,!policy,!password,!web,!sniff,!sensitive,!romon,!winbox"
     $Rw = "read,write,test,ssh,api,rest-api,!local,!telnet,!ftp,!reboot,!policy,!password,!web,!sniff,!sensitive,!romon,!winbox"
-    $U = $script:MtUser; $G = $script:MtGroup
-    # the account is shared with other Butler systems (helpdesk): an existing user keeps its password and group,
-    # and only NetKnife's own key (key-owner = its comment) is replaced — other systems' keys stay
-    return @(
-        $(if ($EnableSshPort) { "/ip service set ssh disabled=no port=$EnableSshPort" })
-        ":if ([:len [/user group find name=`"$G-ro`"]] = 0) do={ /user group add name=$G-ro policy=$Ro comment=`"Butler service: diagnostics, read-only`" }"
-        ":if ([:len [/user group find name=`"$G-rw`"]] = 0) do={ /user group add name=$G-rw policy=$Rw comment=`"Butler service: reserved for write integrations`" }"
-        ":if ([:len [/user find name=`"$U`"]] = 0) do={ /user add name=$U group=$G-ro password=`"$Password`" comment=`"Butler service account (NetKnife, helpdesk)`" }"
-        "/file add name=netknife.pub contents=`"$PubKey`""
-        ":delay 1s"
-        ":do { /user ssh-keys remove [find user=`"$U`" key-owner=`"$($script:MtKeyOwner)`"] } on-error={}"
-        "/user ssh-keys import public-key-file=netknife.pub user=$U"
-        ":do { /file remove [find name=`"netknife.pub`"] } on-error={}"
-        ":put `"NETKNIFE-OK`""
-    ) -ne $null -join "`r`n"
+    $G = $script:MtGroup
+    # random password generated ON the router (never leaves it, never in the clipboard); login is by key only.
+    # :rndstr does not work on RouterOS 7.24 — :rndnum + :pick
+    $Pw = ':local a "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"; :local p ""; :for i from=1 to=32 do={ :set p ($p . [:pick $a [:rndnum from=0 to=56]]) }'
+    $Users = @(@{ U = $script:MtUser; G = "$G-ro"; C = "Butler service: read-only (NetKnife, helpdesk)" }, @{ U = $script:MtRwUser; G = "$G-rw"; C = "Butler service: write, key auth only" })
+    $Out = @()
+    if ($EnableSshPort) { $Out += "/ip service set ssh disabled=no port=$EnableSshPort" }
+    $Out += ":if ([:len [/user group find name=`"$G-ro`"]] = 0) do={ /user group add name=$G-ro policy=$Ro comment=`"Butler service: diagnostics, read-only`" }"
+    $Out += ":if ([:len [/user group find name=`"$G-rw`"]] = 0) do={ /user group add name=$G-rw policy=$Rw comment=`"Butler service: write integrations`" }"
+    # an existing account keeps its group and password; other systems' keys stay (only the same key comment is replaced)
+    foreach ($X in $Users) { $Out += ":if ([:len [/user find name=`"$($X.U)`"]] = 0) do={ $Pw; /user add name=$($X.U) group=$($X.G) password=`$p comment=`"$($X.C)`" }" }
+    $I = 0
+    $Files = @()
+    foreach ($K in @($Keys)) { $I++; foreach ($X in $Users) { $F = "bk$I-$($X.U).pub"; $Files += @{ F = $F; U = $X.U; O = $K.Owner }; $Out += "/file add name=$F contents=`"$($K.Key)`"" } }
+    $Out += ":delay 2s"
+    foreach ($F in $Files) {
+        # key comment is "info" on RouterOS 7.24 (older versions: "key-owner")
+        $Out += ":do { /user ssh-keys remove [find user=`"$($F.U)`" info=`"$($F.O)`"] } on-error={ :do { /user ssh-keys remove [find user=`"$($F.U)`" key-owner=`"$($F.O)`"] } on-error={} }"
+        $Out += "/user ssh-keys import public-key-file=$($F.F) user=$($F.U)"
+    }
+    $Out += ":do { /file remove [find name~`"^bk[0-9]+-`"] } on-error={}"
+    $Out += ":put `"BUTLER-USERS-OK`""
+    return $Out -join "`r`n"
 }
-
 function Initialize-MtKey {
     if (Test-Path "$($script:MtKey).pub") { return $true }
     $Dir = Split-Path $script:MtKey -Parent
@@ -197,6 +217,37 @@ function Test-MtRouter {
         if (-not $J) { Set-MtStatus "$($Rt.Name): ответ не разобран — нужен RouterOS 7.13+ (:serialize)" "fail"; return }
         Set-MtStatus "$($Rt.Name): $($J.id) · $($J.board) · RouterOS $($J.ver) · вход как $(if ($Rt.Ready) { 'butler-service (только чтение)' } else { "$($Rt.Admin) (админ — нажми «Команды подключения»)" })" "ok"
         Start-MtApRefresh $Rt
+    }
+}
+
+# ---------------------------------------------------------------- changes on the router (butler-rw)
+
+# Every write goes through here: the user sees the exact commands and the rollback, confirms; NetKnife saves
+# /export under butler-service to %APPDATA%\NetKnife\mikrotik\<router>\export-before-<time>.rsc, then runs the
+# script as butler-rw. $Script must be one line (RouterOS breaks do={} blocks of multi-line ssh arguments).
+function Invoke-MtChange {
+    param($R, [string]$Title, [string]$Script, [string]$Rollback = "", [scriptblock]$OnDone)
+    if (-not $R.RwReady) { Show-Toast "$($R.Name): нет доступа butler-rw — выполни команды подключения" "warn"; return }
+    $Detail = "Команды (под butler-rw):`n$Script$(if ($Rollback) { "`n`nОткат:`n$Rollback" })"
+    if (-not (Show-Confirm $Title "Изменение на $($R.Name) ($($R.Host)). Перед ним NetKnife сохранит /export роутера." "Применить" -Detail $Detail)) { return }
+    $script:MtChange = @{ R = $R; Title = $Title; Script = $Script; OnDone = $OnDone }
+    Set-MtStatus "$($R.Name): сохраняю /export перед изменением…" "wait"
+    Invoke-MtAsync $R "/export" -Name "mt-change" -TimeoutMs 60000 -OnResult {
+        param($M)
+        $X = $script:MtChange
+        if ($M.Code -ne 0 -or $M.Out -notmatch '/system|/interface') { Set-MtStatus "$($X.R.Name): /export не получен — изменение не применено. $(Get-MtErrText $M)" "fail"; return }
+        $Dir = Join-Path $env:APPDATA ("NetKnife\mikrotik\" + ($X.R.Name -replace '[\\/:*?"<>|]', '_'))
+        if (-not (Test-Path $Dir)) { New-Item -ItemType Directory -Path $Dir | Out-Null }
+        $X.Export = Join-Path $Dir ("export-before-{0:yyyyMMdd-HHmmss}.rsc" -f (Get-Date))
+        [IO.File]::WriteAllText($X.Export, $M.Out, [Text.UTF8Encoding]::new($false))
+        Set-MtStatus "$($X.R.Name): применяю «$($X.Title)»…" "wait"
+        Invoke-MtAsync $X.R $X.Script -Rw -Name "mt-change" -TimeoutMs 30000 -OnResult {
+            param($M)
+            $X = $script:MtChange
+            $Ok = ($M.Code -eq 0 -and "$($M.Out)" -notmatch 'failure|error|expected|bad command|syntax')
+            Set-MtStatus "$($X.R.Name): «$($X.Title)» — $(if ($Ok) { 'применено' } else { "ошибка: $(Get-MtErrText $M) $($M.Out.Trim())" }) · export до изменения: $($X.Export)" $(if ($Ok) { "ok" } else { "fail" })
+            if ($X.OnDone) { & $X.OnDone $Ok $M }
+        }
     }
 }
 
@@ -291,7 +342,7 @@ function Show-MtConnectDialog {
     $D = New-Dialog "Подключить MikroTik" @"
 <StackPanel>
     <TextBlock Text="Подключить MikroTik" FontFamily="{StaticResource DisplayFont}" FontSize="20" FontWeight="SemiBold"/>
-    <TextBlock Foreground="{StaticResource Sub}" TextWrapping="Wrap" Margin="0,6,0,14" FontSize="12.5" Text="Пароль админа не нужен. Открой терминал роутера (Winbox → New Terminal или WebFig → Terminal), вставь команды ниже (правый клик → Paste) и дождись строки NETKNIFE-OK. Затем «Готово — проверить». Команды создают служебного пользователя butler-service только на чтение (группа butler-service-ro; он же для helpdesk) и добавляют ему ключ этого ноутбука; группа butler-service-rw — пустая, на будущее. Если пользователь уже есть, его пароль, группа и чужие ключи не меняются."/>
+    <TextBlock Foreground="{StaticResource Sub}" TextWrapping="Wrap" Margin="0,6,0,14" FontSize="12.5" Text="Пароль админа не нужен. Открой терминал роутера (Winbox → New Terminal или WebFig → Terminal), вставь команды ниже (правый клик → Paste) и дождись строки BUTLER-USERS-OK. Затем «Готово — проверить». Команды создают два общих служебных пользователя (NetKnife, helpdesk, Claude): butler-service — только чтение, для диагностики; butler-rw — запись, только для изменений, которые ты подтверждаешь. Обоим добавляются ключи из реестра (этот ноутбук и ключи helpdesk из настроек); вход только по ключу. Существующих пользователей, их пароли и чужие ключи команды не меняют."/>
     <Grid>
         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="90"/></Grid.ColumnDefinitions>
         <StackPanel><TextBlock Text="ОБЪЕКТ" Style="{StaticResource Caption}"/><TextBox x:Name="FName" Style="{StaticResource Field}" Tag="Алые Паруса 115"/></StackPanel>
@@ -313,15 +364,13 @@ function Show-MtConnectDialog {
 </StackPanel>
 "@ 720
     $F = @{}; foreach ($N in @("FName", "FHost", "FPort", "FCopy", "FCode", "FStatus", "FOk")) { $F[$N] = $D.FindName($N) }
-    $Pub = (Get-Content "$($script:MtKey).pub" -Raw).Trim()
-    $Pw = New-MtPassword
     $SshOff = [bool]($R -and $R.SshOff)
     if ($R) { $F.FName.Text = "$($R.Name)"; $F.FHost.Text = "$($R.Host)"; if ($R.Port) { $F.FPort.Text = "$($R.Port)" } }
-    $script:MtConn = @{ D = $D; F = $F; R = $R; Pw = $Pw; Pub = $Pub; SshOff = $SshOff; Router = $null; Done = $false }
+    $script:MtConn = @{ D = $D; F = $F; R = $R; Keys = @(Get-MtKeyRegistry); SshOff = $SshOff; Router = $null; Done = $false }
     $Build = {
         $C = $script:MtConn
         $P = 0; [void][int]::TryParse($C.F.FPort.Text.Trim(), [ref]$P)
-        $C.F.FCode.Text = Get-MtProvisionScript $C.Pub $C.Pw $(if ($C.SshOff -and $P) { $P } else { 0 })
+        $C.F.FCode.Text = Get-MtProvisionScript $C.Keys $(if ($C.SshOff -and $P) { $P } else { 0 })
     }
     & $Build
     $F.FPort.Add_TextChanged($Build)
@@ -343,10 +392,10 @@ function Show-MtConnectDialog {
         $Old = $C.R
         # the account password belongs to the helpdesk (API logins); NetKnife works by key only and never stores it
         $C.Router = @{ Id = $(if ($Old -and $Old.Id) { $Old.Id } else { [guid]::NewGuid().ToString("N").Substring(0, 8) }); Name = $C.F.FName.Text.Trim(); Host = (Repair-TargetText $C.F.FHost); Port = [int]$C.F.FPort.Text.Trim()
-            Admin = $(if ($Old) { "$($Old.Admin)" } else { "" }); AdminKey = $(if ($Old) { "$($Old.AdminKey)" } else { "" }); Ready = $true; PassEnc = "" }
+            Admin = $(if ($Old) { "$($Old.Admin)" } else { "" }); AdminKey = $(if ($Old) { "$($Old.AdminKey)" } else { "" }); Ready = $true; RwReady = $false; PassEnc = "" }
         $C.Auto = $Auto
         $C.F.FOk.IsEnabled = $false
-        & $C.SetSt $(if ($Auto) { "Проверяю, есть ли уже на роутере пользователь butler-service с ключом этого ноутбука…" } else { "Вхожу на $($C.Router.Host):$($C.Router.Port) как butler-service…" }) "wait"
+        & $C.SetSt $(if ($Auto) { "Проверяю, пускают ли уже butler-service и butler-rw с ключом этого ноутбука…" } else { "Вхожу на $($C.Router.Host):$($C.Router.Port) как butler-service…" }) "wait"
         Invoke-MtAsync $C.Router ':put ("##J" . [:serialize to=json ({"ver"=[/system resource get version]; "id"=[/system identity get name]; "board"=[/system resource get board-name]})])' -Name "mt-conn" -TimeoutMs 15000 -OnResult {
             param($M)
             $C = $script:MtConn
@@ -354,8 +403,8 @@ function Show-MtConnectDialog {
             $C.F.FOk.IsEnabled = $true
             if ($M.Code -ne 0) {
                 $E = "$($M.Err)"
-                if ($E -match 'Permission denied' -and $C.Auto) { & $C.SetSt "Доступа пока нет — выполни команды ниже в терминале роутера. Они сами проверяют пользователя: создадут butler-service, только если его нет, и добавят ключ этого ноутбука." "sub"; return }
-                $Why = $(if ($E -match 'Permission denied') { "вход как butler-service не принят: команды не выполнены или выполнены не полностью — в терминале должна появиться строка NETKNIFE-OK. Если вставлял частями — вставь заново целиком." }
+                if ($E -match 'Permission denied' -and $C.Auto) { & $C.SetSt "Доступа пока нет — выполни команды ниже в терминале роутера. Они сами проверяют пользователей: создадут butler-service и butler-rw, только если их нет, и добавят ключи." "sub"; return }
+                $Why = $(if ($E -match 'Permission denied') { "вход как butler-service не принят: команды не выполнены или выполнены не полностью — в терминале должна появиться строка BUTLER-USERS-OK. Если вставлял частями — вставь заново целиком." }
                     elseif ($E -match 'refused') { "порт $($C.Router.Port) закрыт — проверь SSH-порт (IP → Services → ssh)" }
                     elseif ($E -match 'timed out|No route|Could not resolve') { "роутер недоступен: $E" }
                     else { Get-MtErrText $M })
@@ -363,9 +412,24 @@ function Show-MtConnectDialog {
             }
             $J = ConvertFrom-MtJson $M.Out "##J"
             if (-not $J) { & $C.SetSt "Вход есть, но ответ не разобран — нужен RouterOS 7.13+ (:serialize)" "fail"; return }
-            $C.Info = "$($J.id) · $($J.board) · RouterOS $($J.ver)$(if ($C.Auto) { ' · butler-service уже был' })"
-            $C.Done = $true
-            $C.D.DialogResult = $true
+            $C.Info = "$($J.id) · $($J.board) · RouterOS $($J.ver)"
+            $C.F.FOk.IsEnabled = $false
+            & $C.SetSt "butler-service — вход есть. Проверяю butler-rw…" "wait"
+            Invoke-MtAsync $C.Router ':put "RW-OK"' -Rw -Name "mt-conn" -TimeoutMs 15000 -OnResult {
+                param($M)
+                $C = $script:MtConn
+                if (-not $C -or -not $C.D.IsVisible) { return }
+                $C.F.FOk.IsEnabled = $true
+                if ($M.Code -ne 0 -or $M.Out -notmatch 'RW-OK') {
+                    if ($C.Auto) { & $C.SetSt "butler-service пускает, butler-rw — нет: выполни команды ниже (существующее они не трогают, создадут butler-rw и добавят ключ)." "sub" }
+                    else { & $C.SetSt "butler-rw не пускает: $(Get-MtErrText $M). Команды выполнены целиком? Должна появиться строка BUTLER-USERS-OK." "fail" }
+                    return
+                }
+                $C.Router.RwReady = $true
+                $C.Info += $(if ($C.Auto) { " · пользователи уже были" } else { "" })
+                $C.Done = $true
+                $C.D.DialogResult = $true
+            }
         }
     }
     $F.FOk.Add_Click({ & $script:MtConn.Check $false })
@@ -381,7 +445,7 @@ function Show-MtConnectDialog {
     $script:Settings.Routers = @(Get-MtRouters | Where-Object { $_.Id -ne $New.Id }) + @($New)
     Save-Settings
     Refresh-MtList
-    Set-MtStatus "$($New.Name): $($C.Info) · вход как butler-service (только чтение)" "ok"
+    Set-MtStatus "$($New.Name): $($C.Info) · чтение butler-service, запись butler-rw (только с подтверждением)" "ok"
     Show-Toast "$($New.Name) подключён"
     Start-MtApRefresh $New { param($A) if ($script:WhInit) { try { Update-WhPrep } catch { } } }
 }
@@ -401,6 +465,17 @@ function Initialize-MtSettings {
     Refresh-MtList
     $Ui.SetMtAdd.Add_Click({ Show-MtConnectDialog $null })
     $Ui.SetMtFind.Add_Click({ Start-MtDiscovery })
+    $Ui.SetMtKeys.Text = (@($script:Settings.MtExtraKeys) -join "`r`n")
+    $Ui.SetMtKeys.Add_LostKeyboardFocus({
+        $Bad = @(); $Ok = @()
+        foreach ($Ln in ($Ui.SetMtKeys.Text -split "`r?`n")) {
+            $Ln = $Ln.Trim(); if (-not $Ln) { continue }
+            $P = $Ln -split '\s+'
+            if ($P.Count -ge 3 -and $P[0] -match '^ssh-(rsa|ed25519)$' -and $P[2] -ne $script:MtKeyOwner) { $Ok += $Ln } else { $Bad += $Ln }
+        }
+        $script:Settings.MtExtraKeys = @($Ok); Save-Settings
+        if ($Bad.Count) { Show-Toast "Пропущено строк: $($Bad.Count) — нужен формат «ssh-rsa AAAA… имя-системы»" "warn" } elseif ($Ok.Count) { Show-Toast "Ключей других систем: $($Ok.Count) — войдут в команды подключения" }
+    })
     $Ui.SetMtEdit.Add_Click({ $R = Get-MtSelected; if ($R) { Show-MtConnectDialog $R } })
     $Ui.SetMtList.Add_MouseDoubleClick({ $R = Get-MtSelected; if ($R) { Show-MtConnectDialog $R } })
     $Ui.SetMtPrep.Add_Click({ $R = Get-MtSelected; if ($R) { Show-MtConnectDialog $R } })
@@ -408,7 +483,7 @@ function Initialize-MtSettings {
     $Ui.SetMtAps.Add_Click({ $R = Get-MtSelected; if ($R) { Show-MtApsDialog $R } })
     $Ui.SetMtDel.Add_Click({
         $R = Get-MtSelected; if (-not $R) { return }
-        if (-not (Show-Confirm "Убрать $($R.Name) из NetKnife?" "Удаляется только запись в NetKnife. Пользователь butler-service на роутере остаётся (он общий с helpdesk)." "Убрать" -Danger)) { return }
+        if (-not (Show-Confirm "Убрать $($R.Name) из NetKnife?" "Удаляется только запись в NetKnife. Пользователи butler-service и butler-rw на роутере остаются (они общие с helpdesk)." "Убрать" -Danger)) { return }
         $script:Settings.Routers = @(Get-MtRouters | Where-Object { $_.Id -ne $R.Id }); Save-Settings; Refresh-MtList
     })
 }

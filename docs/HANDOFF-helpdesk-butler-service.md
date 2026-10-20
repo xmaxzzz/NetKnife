@@ -1,86 +1,88 @@
-# HANDOFF → helpdesk: общий служебный пользователь MikroTik `butler-service`
+# MikroTik: общие служебные пользователи Butler (контракт v2, 2026-10-20)
 
-Источник: NetKnife (D:\SCRIPTS\NetKnife, `lib/MikroTik.ps1`, функции `Get-MtProvisionScript`, `Show-MtConnectDialog`).
-Решение владельца (2026-10-19): на всех объектах **один** служебный пользователь RouterOS — `butler-service`.
-Им пользуются NetKnife (ноутбук инженера) и helpdesk. Никаких отдельных `netknife`/`helpdesk` пользователей.
+Решение Максима: на каждом роутере объекта два **общих** пользователя для NetKnife, Helpdesk и Claude.
+Реализация в NetKnife: `lib/MikroTik.ps1` — `Get-MtKeyRegistry`, `Get-MtProvisionScript`, `Show-MtConnectDialog`,
+`Invoke-MtChange`.
 
-## Задача для helpdesk
+| Пользователь | Группа | Для чего |
+|---|---|---|
+| `butler-service` | `butler-service-ro` | чтение и диагностика |
+| `butler-rw` | `butler-service-rw` | запись — только подтверждённые изменения |
 
-При добавлении объекта (или первом подключении к его MikroTik) helpdesk должен:
+Политики:
+- `butler-service-ro`: `read,test,ssh,api,rest-api,!local,!telnet,!ftp,!reboot,!write,!policy,!password,!web,!sniff,!sensitive,!romon,!winbox`
+- `butler-service-rw`: `read,write,test,ssh,api,rest-api,!local,!telnet,!ftp,!reboot,!policy,!password,!web,!sniff,!sensitive,!romon,!winbox`
 
-1. **Сначала проверить**, работает ли вход как `butler-service` со своим ключом (SSH) — если да, ничего не создавать.
-2. **Если нет** — создать пользователя / добавить свой ключ **идемпотентным** скриптом ниже
-   (создаёт только то, чего нет; чужое не трогает).
-3. Проверить вход ещё раз и сохранить результат.
+## Ключи — общий реестр
 
-Если у helpdesk есть админ-доступ к роутеру — шаг 2 выполняется им автоматически.
-Если нет — показать оператору готовые команды для терминала роутера (Winbox → New Terminal), как делает NetKnife,
-и кнопку «Готово — проверить».
+Сейчас в реестре два ключа, оба RSA 4096: `netknife-mikrotik` (NetKnife, `~/.ssh/netknife_mt`) и `butler-helpdesk`.
+Каждый ключ импортируется в **оба** пользователя. Новые ключи под системы не заводим.
 
-## Контракт (менять только по договорённости обеих систем)
+- Комментарий ключа на роутере хранится в поле **`info`** (RouterOS 7.24; в старых версиях `key-owner`). Проверено
+  на «Алые паруса»: `/user ssh-keys print detail` → `info="netknife-mikrotik"`.
+- Перед импортом удаляется только ключ с тем же комментарием, чужие не трогаем:
+  `:do { /user ssh-keys remove [find user="U" info="O"] } on-error={ :do { /user ssh-keys remove [find user="U" key-owner="O"] } on-error={} }`
+- В NetKnife публичные ключи других систем вводятся в поле «Настройки → Роутеры MikroTik → Ключи других систем»
+  и попадают в команды подключения.
 
-| Что | Значение |
-|---|---|
-| Пользователь | `butler-service` |
-| Группа пользователя | `butler-service-ro` |
-| Политика `butler-service-ro` | `read,test,ssh,api,rest-api,!local,!telnet,!ftp,!reboot,!write,!policy,!password,!web,!sniff,!sensitive,!romon,!winbox` |
-| Резервная группа | `butler-service-rw` (без пользователей): `read,write,test,ssh,api,rest-api,!local,!telnet,!ftp,!reboot,!policy,!password,!web,!sniff,!sensitive,!romon,!winbox` |
-| Комментарий пользователя | `Butler service account (NetKnife, helpdesk)` |
-| Ключи | у каждой системы **свой** SSH-ключ; комментарий ключа = `key-owner` на роутере |
-| key-owner NetKnife | `netknife-mikrotik` (RSA 4096) |
-| key-owner helpdesk | предлагается `butler-helpdesk` (любой, но не `netknife-mikrotik`) |
-| SSH-порт | на объектах Butler обычно `10322`, иначе `22` |
+## Правила
 
-### Правила общей учётки
+- Пользователей создаём, только если их нет. У существующих не меняем ни группу, ни пароль.
+- Пароль генерирует сам роутер (`:rndnum` + `:pick`; `:rndstr` на 7.24 не работает), он никуда не выходит.
+  Вход только по ключу.
+- Диагностика — только под `butler-service`.
+- Изменения — только под `butler-rw` и только после явного подтверждения пользователя. Перед изменением
+  сохраняется `/export` (NetKnife кладёт его в `%APPDATA%\NetKnife\mikrotik\<объект>\export-before-<время>.rsc`).
+- Если пускает только `butler-service`, а `butler-rw` нет — не лезть под admin, а дать команды подключения.
 
-- **Существующего пользователя не менять**: ни группу, ни пароль. Только добавить/заменить **свой** ключ.
-- Удалять ключи **только своего** key-owner:
-  `/user ssh-keys remove [find user="butler-service" key-owner="butler-helpdesk"]` — ключ NetKnife остаётся.
-- **Пароль принадлежит helpdesk.** NetKnife входит только по ключу и пароль не хранит. Пароль он задаёт
-  (случайный) лишь когда сам создаёт пользователя — чтобы не оставить пустой. Если helpdesk нужен пароль
-  (API 8728/8729 — там вход только по паролю) и пользователя создал NetKnife — helpdesk при админ-доступе делает
-  `/user set [find name="butler-service"] password="…"`; NetKnife это не ломает.
-- **Права на запись — открытый вопрос.** Пользователь в `-ro`. Если helpdesk нужна запись, перевод общего
-  пользователя в `butler-service-rw` даст запись и NetKnife. Варианты обсудить с владельцем до реализации.
+## Порядок при добавлении объекта (NetKnife и Helpdesk делают одинаково)
 
-## Проверка «пользователь уже есть»
+1. Попробовать вход своим ключом как `butler-service`, затем как `butler-rw` (`:put "OK"`).
+2. Оба пускают — готово, ничего не создавать.
+3. Иначе выполнить идемпотентный скрипт (ниже) — с админ-доступом сам, без него показать оператору для
+   терминала роутера (Winbox → New Terminal).
+4. Повторить проверку из шага 1. Маркер успеха скрипта — `BUTLER-USERS-OK`.
 
-- Без админа (основной путь): попытка входа `ssh -i <ключ helpdesk> -p <порт> -o BatchMode=yes butler-service@<ip> ':put OK'`.
-  Успех = пользователь есть **и** ключ helpdesk на нём. `Permission denied` = пользователя нет **или** нет ключа
-  helpdesk — различить без админа нельзя; в обоих случаях подходит один и тот же идемпотентный скрипт.
-- С админом: `:put [:len [/user find name="butler-service"]]` → `0` / `1`;
-  ключ helpdesk: `:put [:len [/user ssh-keys find user="butler-service" key-owner="butler-helpdesk"]]`.
+## Идемпотентный скрипт (RouterOS 7, вставка в терминал)
 
-## Идемпотентный скрипт (RouterOS 7)
-
-`<PUBKEY>` — публичный ключ helpdesk одной строкой (`ssh-rsa AAAA… butler-helpdesk`), `<RANDOM>` — случайный
-пароль (используется только при создании). Строки независимы, можно вставлять в терминал целиком или выполнять
-по SSH под админом.
+На каждый ключ `<KEYn>` с комментарием `<OWNERn>` — по файлу на пользователя. Пример для двух ключей:
 
 ```
 :if ([:len [/user group find name="butler-service-ro"]] = 0) do={ /user group add name=butler-service-ro policy=read,test,ssh,api,rest-api,!local,!telnet,!ftp,!reboot,!write,!policy,!password,!web,!sniff,!sensitive,!romon,!winbox comment="Butler service: diagnostics, read-only" }
-:if ([:len [/user group find name="butler-service-rw"]] = 0) do={ /user group add name=butler-service-rw policy=read,write,test,ssh,api,rest-api,!local,!telnet,!ftp,!reboot,!policy,!password,!web,!sniff,!sensitive,!romon,!winbox comment="Butler service: reserved for write integrations" }
-:if ([:len [/user find name="butler-service"]] = 0) do={ /user add name=butler-service group=butler-service-ro password="<RANDOM>" comment="Butler service account (NetKnife, helpdesk)" }
-/file add name=butler-helpdesk.pub contents="<PUBKEY>"
-:delay 1s
-:do { /user ssh-keys remove [find user="butler-service" key-owner="butler-helpdesk"] } on-error={}
-/user ssh-keys import public-key-file=butler-helpdesk.pub user=butler-service
-:do { /file remove [find name="butler-helpdesk.pub"] } on-error={}
-:put "BUTLER-SERVICE-OK"
+:if ([:len [/user group find name="butler-service-rw"]] = 0) do={ /user group add name=butler-service-rw policy=read,write,test,ssh,api,rest-api,!local,!telnet,!ftp,!reboot,!policy,!password,!web,!sniff,!sensitive,!romon,!winbox comment="Butler service: write integrations" }
+:if ([:len [/user find name="butler-service"]] = 0) do={ :local a "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"; :local p ""; :for i from=1 to=32 do={ :set p ($p . [:pick $a [:rndnum from=0 to=56]]) }; /user add name=butler-service group=butler-service-ro password=$p comment="Butler service: read-only (NetKnife, helpdesk)" }
+:if ([:len [/user find name="butler-rw"]] = 0) do={ :local a "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"; :local p ""; :for i from=1 to=32 do={ :set p ($p . [:pick $a [:rndnum from=0 to=56]]) }; /user add name=butler-rw group=butler-service-rw password=$p comment="Butler service: write, key auth only" }
+/file add name=bk1-butler-service.pub contents="<KEY1>"
+/file add name=bk1-butler-rw.pub contents="<KEY1>"
+/file add name=bk2-butler-service.pub contents="<KEY2>"
+/file add name=bk2-butler-rw.pub contents="<KEY2>"
+:delay 2s
+:do { /user ssh-keys remove [find user="butler-service" info="<OWNER1>"] } on-error={ :do { /user ssh-keys remove [find user="butler-service" key-owner="<OWNER1>"] } on-error={} }
+/user ssh-keys import public-key-file=bk1-butler-service.pub user=butler-service
+:do { /user ssh-keys remove [find user="butler-rw" info="<OWNER1>"] } on-error={ :do { /user ssh-keys remove [find user="butler-rw" key-owner="<OWNER1>"] } on-error={} }
+/user ssh-keys import public-key-file=bk1-butler-rw.pub user=butler-rw
+:do { /user ssh-keys remove [find user="butler-service" info="<OWNER2>"] } on-error={ :do { /user ssh-keys remove [find user="butler-service" key-owner="<OWNER2>"] } on-error={} }
+/user ssh-keys import public-key-file=bk2-butler-service.pub user=butler-service
+:do { /user ssh-keys remove [find user="butler-rw" info="<OWNER2>"] } on-error={ :do { /user ssh-keys remove [find user="butler-rw" key-owner="<OWNER2>"] } on-error={} }
+/user ssh-keys import public-key-file=bk2-butler-rw.pub user=butler-rw
+:do { /file remove [find name~"^bk[0-9]+-"] } on-error={}
+:put "BUTLER-USERS-OK"
 ```
 
-Тот же скрипт у NetKnife, только файл `netknife.pub`, key-owner `netknife-mikrotik` и маркер `NETKNIFE-OK`.
 Если SSH на роутере выключен, NetKnife добавляет первой строкой `/ip service set ssh disabled=no port=<порт>`.
+Если скрипт передаётся через `ssh` аргументом (а не вставкой в терминал) — одной строкой через `;`: многострочный
+аргумент RouterOS разбирает построчно и ломает блоки `do={…}`.
 
-## Проверено вживую / грабли
+## Состояние «Алые паруса» (192.168.115.1:10322), 2026-10-20
 
-- 2026-10-19: объект «Алые паруса» (192.168.115.1:10322) подключён этим скриптом, вход `butler-service` по ключу
-  работает, `:serialize to=json` и чтение DHCP-аренд под `butler-service-ro` — ок.
-- `/file add contents=` + `/user ssh-keys import` — работают. Ветка `remove … key-owner=` выполнялась под
-  `on-error` и отдельно не проверялась — при первой реализации проверить, что поле называется именно `key-owner`
-  (`/user ssh-keys print detail`).
-- Вывод RouterOS по SSH — сырой UTF-8 (кириллица в DHCP host-name). Читать stdout как UTF-8, иначе кракозябры.
+- `butler-service`: ключи `netknife-mikrotik`, `butler-helpdesk`. Вход NetKnife — есть.
+- `butler-rw`: ключ `netknife-mikrotik`. Вход NetKnife — есть. **Ключа `butler-helpdesk` нет** — добавить
+  (скриптом выше с ключом helpdesk или через NetKnife после ввода ключа в настройках).
+
+## Грабли
+
+- Вывод RouterOS по SSH — сырой UTF-8, stdout читать как UTF-8. Кириллица в **аргументе** ssh теряется —
+  кодировать `\D0\9A…`.
 - `:serialize to=json` — RouterOS 7.13+.
-- Ключ RSA 4096 — самый совместимый вариант; ed25519 на старых RouterOS не принимается.
-- Точки Omada регистрируют DHCP host-name как `AA-BB-CC-DD-EE-FF Имя` (без имени — `MAC (N)`); NetKnife берёт
-  отсюда имена точек.
+- Имя точки Omada в DHCP host-name содержит MAC в любой форме: `MAC Имя`, `Имя (MAC)`, `Имя(MAC)`, `(Имя) MAC`;
+  без имени — `MAC (N)`. Запасной источник имени — комментарий статической аренды (`AP Кабинет`).
