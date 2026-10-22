@@ -43,6 +43,54 @@ function Get-FloorRoomCenter {
     return $null
 }
 
+# ---------------------------------------------------------------- scale (metres)
+
+# Floor.Scale = @{ X1; Y1; X2; Y2; Mm } — a line drawn along a dimension line of the plan and its real length
+function Get-FloorMPerPx {
+    $F = Get-Floor
+    $S = $(if ($F) { $F.Scale } else { $null })
+    if (-not $S -or -not $F.W -or -not $S.Mm) { return 0.0 }
+    $Dx = ([double]$S.X2 - [double]$S.X1) * $F.W; $Dy = ([double]$S.Y2 - [double]$S.Y1) * $F.H
+    $Px = [Math]::Sqrt($Dx * $Dx + $Dy * $Dy)
+    if ($Px -lt 1.0) { return 0.0 }
+    return ([double]$S.Mm / 1000.0) / $Px
+}
+
+# distance in metres between two plan points (fractions), or $null without a scale
+function Get-FloorDist {
+    param($A, $B)
+    $K = Get-FloorMPerPx
+    if (-not $K -or -not $A -or -not $B) { return $null }
+    $F = Get-Floor
+    $Dx = ([double]$B.X - [double]$A.X) * $F.W; $Dy = ([double]$B.Y - [double]$A.Y) * $F.H
+    return [Math]::Sqrt($Dx * $Dx + $Dy * $Dy) * $K
+}
+
+function Format-FloorM { param($M) if ($null -eq $M) { return "" }; return ("{0:N1} м" -f [double]$M) }
+
+function Get-FloorRoomSize {
+    param($R)
+    $K = Get-FloorMPerPx; $F = Get-Floor
+    if (-not $K) { return "" }
+    return ("{0:N1}×{1:N1} м" -f ($R.W * $F.W * $K), ($R.H * $F.H * $K))
+}
+
+# free-space path loss, dB (d in metres, Wi-Fi channel → frequency)
+function Get-FloorFspl {
+    param([double]$D, [int]$Ch)
+    $Mhz = $(if ($Ch -le 14) { 2407 + 5 * $Ch } else { 5000 + 5 * $Ch })
+    return 20 * [Math]::Log10([Math]::Max(1.0, $D)) + 20 * [Math]::Log10($Mhz) - 27.55
+}
+
+# "2900", "2 900", "2900 мм", "2,9 м", "2.9m" → millimetres
+function ConvertTo-FloorMm {
+    param([string]$S)
+    $T = ($S -replace '\s', '').ToLower().Replace(",", ".")
+    if ($T -notmatch '^(\d+(\.\d+)?)(мм|mm|см|cm|м|m)?$') { return 0 }
+    $V = [double]::Parse($Matches[1], [Globalization.CultureInfo]::InvariantCulture)
+    switch ($Matches[3]) { { $_ -in @("м", "m") } { return $V * 1000 } { $_ -in @("см", "cm") } { return $V * 10 } default { return $(if ($V -lt 100 -and $T.Contains(".")) { $V * 1000 } else { $V }) } }
+}
+
 # ---------------------------------------------------------------- import
 
 # any BitmapSource → <site>.floor.png (longest side ≤ 3000 px) → plan.Floor
@@ -60,7 +108,7 @@ function Save-FloorBitmap {
     $Keep = ($F.W -and [Math]::Abs($F.W / [Math]::Max(1, $F.H) - $Bmp.PixelWidth / [double]$Bmp.PixelHeight) -lt 0.02)
     $F.Image = $Name; $F.W = $Bmp.PixelWidth; $F.H = $Bmp.PixelHeight
     if (-not $Keep -and (@($F.Rooms).Count -or $F.Aps.Count)) {
-        if (Show-Confirm "Новый план другой формы" "Пропорции картинки изменились — помещения и точки, расставленные на старом плане, окажутся не на своих местах. Убрать их?" "Убрать") { $F.Rooms = @(); $F.Aps = @{} }
+        if (Show-Confirm "Новый план другой формы" "Пропорции картинки изменились — помещения, точки и масштаб, заданные на старом плане, окажутся не на своих местах. Убрать их?" "Убрать") { $F.Rooms = @(); $F.Aps = @{}; $F.Scale = $null }
     }
     Save-Wplan
     Update-FloorPage
@@ -77,11 +125,11 @@ function Read-FloorBitmapFile {
 function Remove-Floor {
     $F = Get-Floor
     if (-not $F -or -not $F.Image) { return }
-    $Msg = "Удалится картинка плана$(if (@($F.Rooms).Count) { ", помещения ($(@($F.Rooms).Count))" })$(if ($F.Aps.Count) { " и расстановка точек ($($F.Aps.Count))" }). Прогулки, замеры и расчёт останутся. Новый план — кнопкой «Загрузить план»."
+    $Msg = "Удалится картинка плана$(if (@($F.Rooms).Count) { ", помещения ($(@($F.Rooms).Count))" })$(if ($F.Aps.Count) { ", расстановка точек ($($F.Aps.Count))" })$(if ($F.Scale) { ", масштаб" }). Прогулки, замеры и расчёт останутся. Новый план — кнопкой «Загрузить план»."
     if (-not (Show-Confirm "Удалить план?" $Msg "Удалить" -Danger)) { return }
     $P = Get-FloorImagePath
-    $script:Wplan.Floor = @{ Image = ""; W = 0; H = 0; Rooms = @(); Aps = @{} }
-    $script:FloorSelAp = ""
+    $script:Wplan.Floor = @{ Image = ""; W = 0; H = 0; Rooms = @(); Aps = @{}; V = 2 }
+    $script:FloorSelAp = ""; $script:FloorScaleMode = $false
     Save-Wplan
     if ($P) { try { Remove-Item $P -Force } catch { Write-AppLog "floor delete: $_" } }
     if ($script:FloorView) { $script:FloorView.Bmp = $null; $script:FloorView.File = "" }
@@ -297,6 +345,16 @@ function Update-FloorView {
         # label in the top-left corner of the frame — the plan usually has its own caption in the middle
         Add-FloorText $Cv $R.Name ($R.X * $W + 8 * $U) ($R.Y * $H + 6 * $U) (17 * $U) (ConvertTo-Brush "#4338CA") -Bold
     }
+    # scale line
+    if ($F.Scale -and $F.Scale.Mm) {
+        $Sc = $F.Scale; $Or = ConvertTo-Brush "#F97316"
+        $Ln = New-Object System.Windows.Shapes.Line
+        $Ln.X1 = $Sc.X1 * $W; $Ln.Y1 = $Sc.Y1 * $H; $Ln.X2 = $Sc.X2 * $W; $Ln.Y2 = $Sc.Y2 * $H
+        $Ln.Stroke = $Or; $Ln.StrokeThickness = 4 * $U; $Ln.StrokeStartLineCap = "Round"; $Ln.StrokeEndLineCap = "Round"
+        [void]$Cv.Children.Add($Ln)
+        foreach ($Pt in @(@{ X = $Sc.X1; Y = $Sc.Y1 }, @{ X = $Sc.X2; Y = $Sc.Y2 })) { [void](Add-FloorDot $Cv ($Pt.X * $W) ($Pt.Y * $H) (12 * $U) $Or) }
+        Add-FloorText $Cv ("{0:N2} м" -f ($Sc.Mm / 1000.0)) ((($Sc.X1 + $Sc.X2) / 2) * $W) ((($Sc.Y1 + $Sc.Y2) / 2) * $H - 22 * $U) (18 * $U) $Or -Center -Bold
+    }
     # walk overlay: route, signal of the connected AP along it, events, notes
     if ($Walk) {
         $Pts = @(Get-WalkTrack $Walk)
@@ -327,6 +385,7 @@ function Update-FloorView {
 
 $script:FloorSelAp = ""
 $script:FloorDrag = $null
+$script:FloorScaleMode = $false
 
 function Update-FloorPage {
     if (-not $script:FloorView) { return }
@@ -345,19 +404,24 @@ function Update-FloorPage {
     $script:FloorListSync = $true
     $Ui.FlAps.ItemsSource = $Items; $Ui.FlAps.DisplayMemberPath = "Label"
     $Ui.FlAps.SelectedItem = ($Items | Where-Object { $_.Key -eq $script:FloorSelAp } | Select-Object -First 1)
-    $Ui.FlRoomList.ItemsSource = @(if ($F) { @($F.Rooms) | ForEach-Object { [pscustomobject]@{ Name = $_.Name } } })
-    $Ui.FlRoomList.DisplayMemberPath = "Name"
+    $Ui.FlRoomList.ItemsSource = @(if ($F) { @($F.Rooms) | ForEach-Object { $Sz = Get-FloorRoomSize $_; [pscustomobject]@{ Name = $_.Name; Label = "$($_.Name)$(if ($Sz) { "  ·  $Sz" })" } } })
+    $Ui.FlRoomList.DisplayMemberPath = "Label"
     $script:FloorListSync = $false
     $Has = [bool](Get-FloorImagePath)
     $Ui.FlLoadText.Text = $(if ($Has) { "Заменить план" } else { "Загрузить план (PNG, JPG, PDF)" })
     $Ui.FlDelete.Visibility = $(if ($Has) { "Visible" } else { "Collapsed" })
+    $Kpx = Get-FloorMPerPx
+    $Ui.FlScaleText.Text = $(if ($Kpx) { "Масштаб ✔" } else { "Масштаб" })
+    $ScTxt = $(if (-not $Has) { "" } elseif ($Kpx) { " Масштаб: план ≈ {0:N1}×{1:N1} м." -f ($F.W * $Kpx), ($F.H * $Kpx) } else { " Масштаб не задан — кнопка «Масштаб» (расстояния и затухание стен в метрах и dB)." })
     $NPl = $(if ($F) { $F.Aps.Count } else { 0 })
     $Ui.FlCount.Text = "на плане $NPl из $($Items.Count)"
     if (-not (Get-FloorImagePath)) { $Ui.FlHint.Text = "Загрузи план: картинка или PDF (кнопка) или скриншот (Win+Shift+S → «Вставить», Ctrl+V)." }
+    elseif ($script:FloorScaleMode) { $Ui.FlHint.Text = "Масштаб: проведи линию по размерной линии плана (зажми и тяни; Shift — строго по горизонтали/вертикали) и впиши её длину. Esc — отмена." }
     elseif ($script:FloorSelAp) { $Ui.FlHint.Text = "Кликни на плане, где висит «$(Get-WplanApName $script:FloorSelAp)». Esc — отмена." }
     elseif ($Ui.FlRoomMode.IsChecked) { $Ui.FlHint.Text = "Обведи помещение мышью (зажми и тяни), затем впиши название." }
     elseif (-not @($F.Rooms).Count) { $Ui.FlHint.Text = "Помещения: «Распознать помещения» (ИИ прочитает план) или нарисуй сам. Точки: выбери справа и кликни на плане." }
     else { $Ui.FlHint.Text = "Выбери точку справа и кликни на плане, где она висит. Помещений: $(@($F.Rooms).Count)." }
+    if ($ScTxt -and -not $script:FloorScaleMode) { $Ui.FlHint.Text += $ScTxt }
     Update-WhStepper
 }
 
@@ -377,12 +441,19 @@ function Initialize-FloorPage {
     $Ui.FlPaste.Add_Click({ Import-FloorClipboard })
     $Ui.FlRooms.Add_Click({ Start-FloorRoomsAi })
     $Ui.FlDelete.Add_Click({ Remove-Floor })
+    $Ui.FlScale.Add_Click({
+        if (-not (Get-FloorImagePath)) { Show-Toast "Сначала загрузи план" "warn"; return }
+        $script:FloorScaleMode = -not $script:FloorScaleMode
+        $script:FloorSelAp = ""; $Ui.FlRoomMode.IsChecked = $false
+        Update-FloorPage
+    })
+    $script:Win.Add_PreviewKeyDown({ param($S, $E) if ($E.Key -eq "Escape" -and $script:FloorScaleMode) { $script:FloorScaleMode = $false; Update-FloorPage } })
     $Ui.FlRoomMode.Add_Click({ $script:FloorSelAp = ""; Update-FloorPage })
     $Ui.FlAps.Add_SelectionChanged({
         if ($script:FloorListSync) { return }
         $S = $Ui.FlAps.SelectedItem
         $script:FloorSelAp = $(if ($S) { $S.Key } else { "" })
-        if ($script:FloorSelAp) { $Ui.FlRoomMode.IsChecked = $false }
+        if ($script:FloorSelAp) { $Ui.FlRoomMode.IsChecked = $false; $script:FloorScaleMode = $false }
         Update-FloorPage
     })
     $Ui.FlAps.Add_KeyDown({
@@ -405,6 +476,15 @@ function Initialize-FloorPage {
         param($S, $E)
         $P = Get-FloorPos $E; if (-not $P) { return }
         $F = Get-Floor
+        if ($script:FloorScaleMode) {
+            $L = New-Object System.Windows.Shapes.Line
+            $L.X1 = $P.X * $script:FloorView.W; $L.Y1 = $P.Y * $script:FloorView.H; $L.X2 = $L.X1; $L.Y2 = $L.Y1
+            $L.Stroke = ConvertTo-Brush "#F97316"; $L.StrokeThickness = 4 * $script:FloorView.W / 1000
+            $script:FloorDrag = @{ Kind = "scale"; X0 = $P.X; Y0 = $P.Y; X1 = $P.X; Y1 = $P.Y; Line = $L }
+            [void]$script:FloorView.Canvas.Children.Add($L)
+            [void]$script:FloorView.Canvas.CaptureMouse()
+            return
+        }
         if ($script:FloorSelAp) {
             $F.Aps[$script:FloorSelAp] = @{ X = [Math]::Round($P.X, 4); Y = [Math]::Round($P.Y, 4) }
             # next unplaced AP is selected automatically — place them one after another
@@ -414,7 +494,7 @@ function Initialize-FloorPage {
             return
         }
         if ($Ui.FlRoomMode.IsChecked) {
-            $script:FloorDrag = @{ X0 = $P.X; Y0 = $P.Y; Rect = New-Object System.Windows.Shapes.Rectangle }
+            $script:FloorDrag = @{ Kind = "room"; X0 = $P.X; Y0 = $P.Y; Rect = New-Object System.Windows.Shapes.Rectangle }
             $R = $script:FloorDrag.Rect
             $R.Stroke = Get-Brush "Accent"; $R.StrokeThickness = 3 * $script:FloorView.W / 1000
             [void]$script:FloorView.Canvas.Children.Add($R)
@@ -426,6 +506,15 @@ function Initialize-FloorPage {
         $D = $script:FloorDrag; if (-not $D) { return }
         $P = Get-FloorPos $E; if (-not $P) { return }
         $V = $script:FloorView
+        if ($D.Kind -eq "scale") {
+            # Shift: strictly horizontal / vertical (dimension lines are)
+            if ([System.Windows.Input.Keyboard]::Modifiers -band [System.Windows.Input.ModifierKeys]::Shift) {
+                if ([Math]::Abs(($P.X - $D.X0) * $V.W) -ge [Math]::Abs(($P.Y - $D.Y0) * $V.H)) { $P.Y = $D.Y0 } else { $P.X = $D.X0 }
+            }
+            $D.X1 = $P.X; $D.Y1 = $P.Y
+            $D.Line.X2 = $P.X * $V.W; $D.Line.Y2 = $P.Y * $V.H
+            return
+        }
         [System.Windows.Controls.Canvas]::SetLeft($D.Rect, [Math]::Min($D.X0, $P.X) * $V.W); [System.Windows.Controls.Canvas]::SetTop($D.Rect, [Math]::Min($D.Y0, $P.Y) * $V.H)
         $D.Rect.Width = [Math]::Abs($P.X - $D.X0) * $V.W; $D.Rect.Height = [Math]::Abs($P.Y - $D.Y0) * $V.H
     })
@@ -434,6 +523,25 @@ function Initialize-FloorPage {
         $D = $script:FloorDrag; if (-not $D) { return }
         $script:FloorDrag = $null
         $script:FloorView.Canvas.ReleaseMouseCapture()
+        if ($D.Kind -eq "scale") {
+            $V = $script:FloorView
+            $Px = [Math]::Sqrt([Math]::Pow(($D.X1 - $D.X0) * $V.W, 2) + [Math]::Pow(($D.Y1 - $D.Y0) * $V.H, 2))
+            if ($Px -lt 20) { Update-FloorPage; return }
+            $F = Get-Floor
+            $Def = $(if ($F.Scale -and $F.Scale.Mm) { "$([int]$F.Scale.Mm)" } else { "" })
+            $In = Show-FloorInput "Длина отрезка" "Сколько это в реальности? В миллиметрах, как на размерных линиях плана (2900), или в метрах (2,9 м)." $Def
+            $Mm = $(if ($In) { ConvertTo-FloorMm $In } else { 0 })
+            if ($In -and $Mm -le 0) { Show-Toast "Не понял длину: «$In»" "warn" }
+            if ($Mm -gt 0) {
+                $F.Scale = @{ X1 = [Math]::Round($D.X0, 5); Y1 = [Math]::Round($D.Y0, 5); X2 = [Math]::Round($D.X1, 5); Y2 = [Math]::Round($D.Y1, 5); Mm = [double]$Mm }
+                $script:FloorScaleMode = $false
+                Save-Wplan
+                $K = Get-FloorMPerPx
+                Show-Toast ("Масштаб задан: план ≈ {0:N1}×{1:N1} м" -f ($F.W * $K), ($F.H * $K))
+            }
+            Update-FloorPage
+            return
+        }
         $P = Get-FloorPos $E
         if (-not $P -or [Math]::Abs($P.X - $D.X0) -lt 0.01 -or [Math]::Abs($P.Y - $D.Y0) -lt 0.01) { Update-FloorPage; return }
         $N = Show-FloorInput "Новое помещение" "Название — так его нужно будет называть на прогулке." ""

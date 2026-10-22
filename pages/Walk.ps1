@@ -364,6 +364,45 @@ function Get-WalkEventMarks {
     return $L
 }
 
+# where the engineer was during a room interval: clicks (middle of the stay) or the room centre
+function Get-WalkIntervalPos {
+    param($K, $I)
+    # clicks made while in the room → their average; else the room centre; else the route at mid-stay
+    $In = @($K.Clicks | Where-Object { [double]$_.T -ge [double]$I.T0 -and [double]$_.T -lt [double]$I.T1 })
+    if ($In.Count) { return @{ X = ($In | Measure-Object -Property X -Average).Average; Y = ($In | Measure-Object -Property Y -Average).Average } }
+    $C = Get-FloorRoomCenter $I.Room
+    if ($C) { return $C }
+    $An = @(Get-WalkAnchors $K)
+    if ($An.Count) { return Get-WalkPosAt $An (([double]$I.T0 + [double]$I.T1) / 2) }
+    return $null
+}
+
+# AP position on the plan by BSSID (group key), or $null
+function Get-WalkApPos {
+    param([string]$Bssid)
+    $F = Get-Floor
+    if (-not $F -or -not $Bssid) { return $null }
+    $Ky = Get-WplanKey $Bssid
+    if ($F.Aps.ContainsKey($Ky)) { return $F.Aps[$Ky] }
+    return $null
+}
+
+# measured vs free space: expected = EIRP − FSPL(d) − client loss; excess = what walls/floors took (dB).
+# Client loss ≈ 10 dB (laptop antennas, body, polarisation) so a room in line of sight lands near 0.
+$script:WalkClientLoss = 10
+function Get-WalkWallLoss {
+    param([string]$Key, [string]$Band, [int]$Ch, [int]$Rssi, $Pos)
+    $F = Get-Floor
+    if (-not $Pos -or -not $F.Aps.ContainsKey($Key)) { return $null }
+    $D = Get-FloorDist $Pos $F.Aps[$Key]
+    if ($null -eq $D) { return $null }
+    $A = $script:Wplan.Aps[$Key]
+    $Tx = $(if ($A) { "$(if ($Band -eq '5') { $A.Tx5 } else { $A.Tx24 })" } else { "" })
+    if ($Tx -notmatch '^\d+$') { return @{ D = $D } }
+    $Exp = [int]$Tx - (Get-FloorFspl $D $Ch) - $script:WalkClientLoss
+    return @{ D = $D; Exp = [int][Math]::Round($Exp); Loss = [int][Math]::Round($Exp - $Rssi) }
+}
+
 # ---------------------------------------------------------------- report
 
 function Get-WalkReport {
@@ -385,8 +424,9 @@ function Get-WalkReport {
         $Gw = @($C | Where-Object { $_.Conn -and -not $_.Scan })
         $Loss = $(if ($Gw.Count) { 100.0 * @($Gw | Where-Object { [int]$_.Gw -lt 0 }).Count / $Gw.Count } else { 0 })
         $Ev = @($K.Events | Where-Object { $_.T -ge $I.T0 -and $_.T -lt $I.T1 -and $_.Kind -in @("warn", "fail") -and $_.Title -notlike "Windows*" })
+        $Dist = $(if ($Ap) { Get-FloorDist (Get-WalkIntervalPos $K $I) (Get-WalkApPos $Ap.Name) } else { $null })
         [void]$Out.AppendLine(("  {0}  {1,-22} {2,5}  {3}{4}{5}" -f (Format-WalkTime $I.T0), $I.Room, (Format-WalkTime ($I.T1 - $I.T0)),
-            $(if ($Ap) { "$(Get-RoamApName $Ap.Name) $(if ($Rs.Count) { "$($Rs[[int][Math]::Floor(($Rs.Count - 1) / 2)]) (мин $($Rs[0]))" }) dBm" } else { "нет подключения" }),
+            $(if ($Ap) { "$(Get-RoamApName $Ap.Name) $(if ($Rs.Count) { "$($Rs[[int][Math]::Floor(($Rs.Count - 1) / 2)]) (мин $($Rs[0]))" }) dBm$(if ($null -ne $Dist) { ", до точки $(Format-FloorM $Dist)" })" } else { "нет подключения" }),
             $(if ($Loss -ge 2) { (" · потери до шлюза {0:N0}%" -f $Loss) } else { "" }),
             $(if ($Ev.Count) { " · " + (@($Ev | ForEach-Object { $_.Title }) -join "; ") } else { "" })))
     }
@@ -435,30 +475,46 @@ function Get-WalkAiData {
     $F = Get-Floor
     $Out = [System.Text.StringBuilder]::new()
     [void]$Out.AppendLine("ОБЪЕКТ: $($script:Wplan.Site); SSID: $(@($script:Wplan.Ssids) -join ', ')")
-    [void]$Out.AppendLine("ТОЧКИ ДОСТУПА (положение на плане в долях ширины/высоты; помещение; текущая мощность из Omada):")
+    $Kpx = Get-FloorMPerPx
+    if ($Kpx) { [void]$Out.AppendLine(("МАСШТАБ: план {0:N1}×{1:N1} м; координаты ниже — метры от левого верхнего угла плана." -f ($F.W * $Kpx), ($F.H * $Kpx))) }
+    [void]$Out.AppendLine("ТОЧКИ ДОСТУПА (положение на плане; помещение; текущая мощность EIRP из Omada):")
     $Keys = @(@($script:Wplan.Aps.Keys) + @($F.Aps.Keys) | Sort-Object -Unique)
     foreach ($Ky in $Keys) {
         $A = $script:Wplan.Aps[$Ky]; $P = $F.Aps[$Ky]
         $Rm = $(if ($P) { (Get-FloorRoomAt $P.X $P.Y).Name } else { "" })
-        [void]$Out.AppendLine(("  {0}: {1}{2}; 2.4 ГГц {3} dBm, 5 ГГц {4} dBm" -f (Get-WplanApName $Ky), $(if ($P) { "x={0:N2} y={1:N2}" -f $P.X, $P.Y } else { "не отмечена на плане" }), $(if ($Rm) { " ($Rm)" } else { "" }), $(if ($A -and "$($A.Tx24)") { $A.Tx24 } else { "?" }), $(if ($A -and "$($A.Tx5)") { $A.Tx5 } else { "?" })))
+        [void]$Out.AppendLine(("  {0}: {1}{2}; 2.4 ГГц {3} dBm, 5 ГГц {4} dBm" -f (Get-WplanApName $Ky), $(if (-not $P) { "не отмечена на плане" } elseif ($Kpx) { "x={0:N1} м y={1:N1} м" -f ($P.X * $F.W * $Kpx), ($P.Y * $F.H * $Kpx) } else { "x={0:N2} y={1:N2} (доли)" -f $P.X, $P.Y }), $(if ($Rm) { " ($Rm)" } else { "" }), $(if ($A -and "$($A.Tx24)") { $A.Tx24 } else { "?" }), $(if ($A -and "$($A.Tx5)") { $A.Tx5 } else { "?" })))
+    }
+    if ($Kpx -and $F.Aps.Count -ge 2) {
+        [void]$Out.AppendLine("РАССТОЯНИЕ ДО БЛИЖАЙШЕЙ ТОЧКИ:")
+        foreach ($Ky in @($F.Aps.Keys)) {
+            $Nb = @($F.Aps.Keys | Where-Object { $_ -ne $Ky } | ForEach-Object { @{ K = $_; D = (Get-FloorDist $F.Aps[$Ky] $F.Aps[$_]) } } | Sort-Object { $_.D }) | Select-Object -First 1
+            if ($Nb) { [void]$Out.AppendLine(("  {0} → {1}: {2}" -f (Get-WplanApName $Ky), (Get-WplanApName $Nb.K), (Format-FloorM $Nb.D))) }
+        }
     }
     if (@($F.Rooms).Count) {
-        [void]$Out.AppendLine("ПОМЕЩЕНИЯ (прямоугольники x,y,w,h в долях):")
-        foreach ($R in @($F.Rooms)) { [void]$Out.AppendLine(("  {0}: {1:N2},{2:N2},{3:N2},{4:N2}" -f $R.Name, $R.X, $R.Y, $R.W, $R.H)) }
+        [void]$Out.AppendLine($(if ($Kpx) { "ПОМЕЩЕНИЯ (левый верхний угол x,y и размер, м):" } else { "ПОМЕЩЕНИЯ (прямоугольники x,y,w,h в долях):" }))
+        foreach ($R in @($F.Rooms)) {
+            if ($Kpx) { [void]$Out.AppendLine(("  {0}: {1:N1},{2:N1} · {3}" -f $R.Name, ($R.X * $F.W * $Kpx), ($R.Y * $F.H * $Kpx), (Get-FloorRoomSize $R))) }
+            else { [void]$Out.AppendLine(("  {0}: {1:N2},{2:N2},{3:N2},{4:N2}" -f $R.Name, $R.X, $R.Y, $R.W, $R.H)) }
+        }
     }
     [void]$Out.AppendLine("")
     [void]$Out.AppendLine((Get-WalkReport))
     # what the laptop heard in each room (best 3 APs per band from the scans)
-    [void]$Out.AppendLine("ЭФИР ПО ПОМЕЩЕНИЯМ (медиана, dBm ноутбука; лучшие 3 своих точки на диапазон):")
+    [void]$Out.AppendLine("ЭФИР ПО ПОМЕЩЕНИЯМ (медиана, dBm ноутбука; лучшие 3 своих точки на диапазон$(if ($Kpx) { '; в скобках расстояние до точки и сколько dB «съели» стены/перекрытия против свободного пространства (EIRP − FSPL)' })):")
     foreach ($I in @($K.Timeline)) {
         $Sc = @($K.Scans | Where-Object { $_.T -ge $I.T0 -and $_.T -le $I.T1 })
         if (-not $Sc.Count) { continue }
         $Line = "  $($I.Room):"
         foreach ($B in @("5", "2.4")) {
             $Acc = @{}
-            foreach ($S in $Sc) { foreach ($X in @($S.Samples)) { if ($X.Band -ne $B -or -not (Test-WplanOurs $X)) { continue }; $Ky = Get-WplanKey $X.Bssid; if (-not $Acc.ContainsKey($Ky)) { $Acc[$Ky] = [System.Collections.Generic.List[int]]::new() }; $Acc[$Ky].Add([int]$X.Rssi) } }
-            $Top = @($Acc.Keys | ForEach-Object { $L = @($Acc[$_] | Sort-Object); @{ K = $_; R = $L[[int][Math]::Floor(($L.Count - 1) / 2)]; Ch = 0 } } | Sort-Object { -$_.R } | Select-Object -First 3)
-            $Line += " $B ГГц: " + $(if ($Top.Count) { (@($Top | ForEach-Object { "$(Get-WplanApName $_.K) $($_.R)" }) -join ", ") } else { "—" }) + ";"
+            foreach ($S in $Sc) { foreach ($X in @($S.Samples)) { if ($X.Band -ne $B -or -not (Test-WplanOurs $X)) { continue }; $Ky = Get-WplanKey $X.Bssid; if (-not $Acc.ContainsKey($Ky)) { $Acc[$Ky] = @{ R = [System.Collections.Generic.List[int]]::new(); Ch = [int]$X.Ch } }; $Acc[$Ky].R.Add([int]$X.Rssi) } }
+            $Top = @($Acc.Keys | ForEach-Object { $L = @($Acc[$_].R | Sort-Object); @{ K = $_; R = $L[[int][Math]::Floor(($L.Count - 1) / 2)]; Ch = $Acc[$_].Ch } } | Sort-Object { -$_.R } | Select-Object -First 3)
+            $Pos = Get-WalkIntervalPos $K $I
+            $Line += " $B ГГц: " + $(if ($Top.Count) { (@($Top | ForEach-Object {
+                $Wl = Get-WalkWallLoss $_.K $B $_.Ch $_.R $Pos
+                "$(Get-WplanApName $_.K) $($_.R)$(if ($Wl) { " ($(Format-FloorM $Wl.D)$(if ($null -ne $Wl.Loss) { ", стены ≈$($Wl.Loss) dB" }))" })"
+            }) -join ", ") } else { "—" }) + ";"
         }
         [void]$Out.AppendLine($Line)
     }
@@ -467,7 +523,7 @@ function Get-WalkAiData {
 
 function Start-WalkAi {
     if (-not $script:Walk) { Show-Toast "Нет прогулки" "warn"; return }
-    $Sys = "Ты инженер беспроводных сетей (TP-Link Omada, точки EAP, роутер MikroTik). Дан план объекта с отмеченными точками доступа (синие кружки), маршрутом обхода (линия), уровнем сигнала подключения по пути (зелёный ≥-60, жёлто-зелёный ≥-67, жёлтый ≥-72, оранжевый ≥-78, красный хуже; dBm ноутбука, телефон примерно на 6 dB хуже), событиями (синий — бесшовный переход, оранжевый — переход с паузой, красный — обрыв, фиолетовый — голосовая заметка инженера) и данные обхода. Разбери: где покрытие слабое и почему (стены, расстояние до точки), где клиенты «липнут» к дальней точке, где проблемы не радио (потери до шлюза при хорошем сигнале — кабель/порт/PoE). Дай конкретные действия по пунктам: мощность и канал по точкам, перенос или добавление точки (куда, на плане), настройки Omada. Учитывай голосовые заметки. По-русски, кратко, без воды."
+    $Sys = "Ты инженер беспроводных сетей (TP-Link Omada, точки EAP, роутер MikroTik). Дан план объекта с отмеченными точками доступа (синие кружки), масштабной линией (оранжевая, если задана), маршрутом обхода (линия), уровнем сигнала подключения по пути (зелёный ≥-60, жёлто-зелёный ≥-67, жёлтый ≥-72, оранжевый ≥-78, красный хуже; dBm ноутбука, телефон примерно на 6 dB хуже), событиями (синий — бесшовный переход, оранжевый — переход с паузой, красный — обрыв, фиолетовый — голосовая заметка инженера) и данные обхода. Если есть масштаб — пользуйся метрами и оценкой «стены ≈ N dB» (замер против свободного пространства, поправка клиента 10 dB уже учтена; оценка грубая ±5 dB, сравнивай помещения между собой): большая цифра на коротком расстоянии — капитальная стена/перекрытие между точкой и помещением, малая на длинном — просто далеко. Разбери: где покрытие слабое и почему (стены, расстояние до точки), где клиенты «липнут» к дальней точке, где проблемы не радио (потери до шлюза при хорошем сигнале — кабель/порт/PoE). Дай конкретные действия по пунктам: мощность и канал по точкам, перенос или добавление точки (куда, на плане; с масштабом — в метрах), настройки Omada. Учитывай голосовые заметки. По-русски, кратко, без воды."
     $Ui.WkAi.IsEnabled = $false
     $Ui.WkResult.Text = (Get-WalkReport) + "`r`n━━━ РАЗБОР ИИ ━━━`r`nотправляю план, карту и данные обхода ($((Get-AiConf).Title))…"
     $Ok = Start-AiRequest -Name "walk-ai" -System $Sys -UserText (Get-WalkAiData) -MaxTokens 3000 -ImageB64 (Get-WalkMapB64) -OnResult {
