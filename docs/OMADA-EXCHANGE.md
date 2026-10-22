@@ -29,8 +29,11 @@ Omada; NetKnife только читает и пишет JSON-файлы этог
       "ip": "192.168.115.208",
       "model": "EAP613",
       "radios": {
-        "2g": { "enabled": true, "channel": 6,  "width": 20, "txPowerMode": "custom", "txPower": 14 },
-        "5g": { "enabled": true, "channel": 36, "width": 40, "txPowerMode": "custom", "txPower": 20 }
+        "2g": { "enabled": true, "channel": 6,  "width": 20, "txPowerMode": "custom", "txPower": 14,
+                "channels": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], "widths": [20, 40] },
+        "5g": { "enabled": true, "channel": 36, "width": 40, "txPowerMode": "custom", "txPower": 20,
+                "channels": [36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140],
+                "widths": [20, 40, 80] }
       }
     }
   ]
@@ -48,6 +51,9 @@ Omada; NetKnife только читает и пишет JSON-файлы этог
   - `txPower` — мощность в dBm (EIRP, как в поле Custom). Для `low/medium/high/auto` — фактическое значение, если
     Omada его показывает, иначе `null`.
   - `enabled` — радио включено.
+  - `channels` — **каналы, которые Omada разрешает выбрать для этого радио** (выпадающий список «Channel» точки
+    при текущей стране сайта), числами. По ним NetKnife строит план — каналов вне списка в плане не будет.
+  - `widths` — доступные ширины канала (20/40/80/160).
 - `country` — страна сайта (Site Settings → Country/Region), код ISO (`RU`, `DE`…).
 
 ## `kind: "plan"` — что выставить

@@ -448,8 +448,9 @@ function Get-WplanChannels {
         $UseDfs = (-not $script:Wplan.Opt.NoDfs) -and (@($Av.NoDfs).Count -lt $N)
         $C = & $Pick $UseDfs
         # the widest width that still gives most APs a block of their own
-        if ($N -le @($C.Q).Count) { $Width = 80; $Opts = $C.Q }
-        elseif (@($C.P).Count -ge [Math]::Ceiling($N * 0.6)) { $Width = 40; $Opts = $C.P }
+        $Wok = { param($Wd) -not @($Av.Widths).Count -or @($Av.Widths) -contains $Wd }
+        if ($N -le @($C.Q).Count -and (& $Wok 80)) { $Width = 80; $Opts = $C.Q }
+        elseif (@($C.P).Count -ge [Math]::Ceiling($N * 0.6) -and (& $Wok 40)) { $Width = 40; $Opts = $C.P }
         else { $Width = 20; $Opts = $C.S }
         $Note = "каналы 5 ГГц для страны $($Av.Country): $($Av.Text)$(if ($UseDfs) { ' · DFS включён — без него каналов на ' + $N + ' точек мало' } elseif ($script:Wplan.Opt.NoDfs) { ' · DFS выключен вручную' }) · ширина $Width МГц"
     }
@@ -459,6 +460,19 @@ function Get-WplanChannels {
         $Sum = 0
         foreach ($Rw in $Plan.Rows) { $R = $Rw.Name; if ($S[$R].ContainsKey($A) -and $S[$R].ContainsKey($C)) { $Sum += [Math]::Max(0, [Math]::Min($S[$R][$A], $S[$R][$C]) + 85) } }
         $W["$A|$C"] = $Sum
+    } }
+    $Seen = @{}; foreach ($K2 in $Keys) { $Seen[$K2] = @($Plan.Rows | Where-Object { $S[$_.Name].ContainsKey($K2) -and $S[$_.Name][$K2] -gt -85 }).Count }
+    # unknown overlap: from the distance on the floor plan if both APs are placed (closer = stronger), else moderate
+    $Fl = $script:Wplan.Floor
+    foreach ($A in $Keys) { foreach ($C in $Keys) {
+        if ($A -eq $C -or ($Seen[$A] -ge 1 -and $Seen[$C] -ge 1)) { continue }
+        $Est = 25
+        if ($Fl -and $Fl.Aps -and $Fl.Aps[$A] -and $Fl.Aps[$C]) {
+            $Dm = $(if (Get-Command Get-FloorDist -ErrorAction SilentlyContinue) { Get-FloorDist $Fl.Aps[$A] $Fl.Aps[$C] } else { $null })
+            if ($null -ne $Dm) { $Est = [Math]::Max(3.0, 60.0 - 3.0 * $Dm) }   # ~0 beyond 20 m
+            else { $Df = [Math]::Sqrt([Math]::Pow([double]$Fl.Aps[$A].X - [double]$Fl.Aps[$C].X, 2) + [Math]::Pow([double]$Fl.Aps[$A].Y - [double]$Fl.Aps[$C].Y, 2)); $Est = [Math]::Max(3.0, 60.0 * (1.0 - $Df / 0.6)) }
+        }
+        $W["$A|$C"] = [Math]::Max($W["$A|$C"], $Est)
     } }
     $Deg = @{}; foreach ($A in $Keys) { $T = 0; foreach ($C in $Keys) { if ($A -ne $C) { $T += $W["$A|$C"] } }; $Deg[$A] = $T }
     $Assign = @{}
@@ -479,6 +493,10 @@ function Get-WplanChannels {
 # 5 GHz channels the site may use (20 MHz primaries), by the country of the Omada site (Omada export, else the
 # beacon Country element). 120–128 (weather radar, long DFS waits) are never planned.
 function Get-WplanCh5Allowed {
+    if (@($script:Wplan.OmadaCh5).Count) {
+        $L = @($script:Wplan.OmadaCh5 | ForEach-Object { [int]$_ } | Where-Object { $_ -notin @(120, 124, 128) } | Sort-Object)
+        return @{ Country = "$(if ($script:Wplan.OmadaCountry) { $script:Wplan.OmadaCountry } else { '?' }), список из Omada"; All = $L; NoDfs = @($L | Where-Object { $_ -le 48 -or $_ -ge 149 }); Text = (@($L | ForEach-Object { "$_" }) -join ","); Widths = @($script:Wplan.OmadaW5) }
+    }
     $Cc = $(if ($script:Wplan.OmadaCountry) { "$($script:Wplan.OmadaCountry)" } elseif ($script:Wplan.AirCountry) { "$($script:Wplan.AirCountry)" } else { "" })
     $Eu = @("DE", "FR", "IT", "ES", "NL", "BE", "AT", "PL", "CZ", "FI", "SE", "DK", "NO", "CH", "GB", "IE", "PT", "GR", "HU", "SK", "SI", "HR", "RO", "BG", "LT", "LV", "EE", "LU")
     $L = $(if ($Cc -eq "RU") { @(36, 40, 44, 48, 52, 56, 60, 64, 132, 136, 140, 144, 149, 153, 157, 161, 165) }

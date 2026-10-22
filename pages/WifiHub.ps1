@@ -408,7 +408,7 @@ function Get-WhOmadaTaskText {
 Работаем в формате netknife-omada/1 (описание в конце). NetKnife к контроллеру не подключается — всё в Omada делаешь ты, по шагам ниже.
 
 ШАГ 1. ВЫГРУЗКА ТЕКУЩИХ НАСТРОЕК (только чтение, ничего не менять)
-Собери по всем точкам доступа сайта: name, mac (AA-BB-CC-DD-EE-FF), ip, model и для каждого радио (2g, 5g, 6g если есть): enabled, channel (число или "auto"), width (20/40/80/160 или "auto"), txPowerMode (low/medium/high/custom/auto), txPower (dBm). Добавь country сайта. Верни один JSON с "kind": "state" — если можешь писать файлы, сохрани в
+Собери по всем точкам доступа сайта: name, mac (AA-BB-CC-DD-EE-FF), ip, model и для каждого радио (2g, 5g, 6g если есть): enabled, channel (число или "auto"), width (20/40/80/160 или "auto"), txPowerMode (low/medium/high/custom/auto), txPower (dBm), а также channels — список каналов, которые Omada разрешает выбрать для этого радио (выпадающий список Channel при текущей стране сайта), и widths — доступные ширины. Добавь country сайта. Список channels обязателен: по нему NetKnife строит план, чтобы в нём не было недоступных каналов. Верни один JSON с "kind": "state" — если можешь писать файлы, сохрани в
   $StateFile
 и в любом случае выведи JSON целиком одним блоком, чтобы я скопировал его в NetKnife («Загрузить из Omada»).
 
@@ -459,7 +459,7 @@ function Import-WhOmadaState {
     if (-not $J -or "$($J.format)" -ne "netknife-omada/1") { Show-Toast "Это не выгрузка netknife-omada/1 — попроси агента вернуть JSON по шагу 1 задачи" "warn"; return }
     if ("$($J.kind)" -ne "state") { Show-Toast "В файле kind «$($J.kind)», а нужен «state» — это выгрузка из Omada (шаг 1)" "warn"; return }
     $ByName = @{}; foreach ($X in @(Get-WhApRows)) { $ByName[$X.Name.ToLower()] = $X.Key }
-    $N = 0; $NTx = 0; $Miss = @(); $Now = Get-Date -Format "yyyy-MM-dd HH:mm"
+    $N = 0; $NTx = 0; $Miss = @(); $Now = Get-Date -Format "yyyy-MM-dd HH:mm"; $Ch5Sets = @(); $W5Sets = @()
     foreach ($Ap in @($J.aps)) {
         $K = $(if ($Ap.mac) { Get-WplanKey "$($Ap.mac)" } else { "" })
         if (-not $K -or -not ($script:Wplan.Aps.ContainsKey($K) -or ($ByName.Values -contains $K))) { if ($Ap.name -and $ByName[("$($Ap.name)").ToLower()]) { $K = $ByName[("$($Ap.name)").ToLower()] } }
@@ -472,16 +472,23 @@ function Import-WhOmadaState {
         foreach ($Pair in @(@("2g", "2.4", "Tx24"), @("5g", "5", "Tx5"))) {
             $Rd = $(if ($Ap.radios) { $Ap.radios[$Pair[0]] } else { $null })
             if (-not $Rd) { continue }
-            $A.Omada[$Pair[1]] = @{ Ch = "$($Rd.channel)"; W = "$($Rd.width)"; Mode = "$($Rd.txPowerMode)"; Tx = $Rd.txPower; On = $Rd.enabled }
+            $Chs = @(@($Rd.channels) | Where-Object { "$_" -match '^\d+$' } | ForEach-Object { [int]$_ })
+            $Wds = @(@($Rd.widths) | Where-Object { "$_" -match '^\d+$' } | ForEach-Object { [int]$_ })
+            $A.Omada[$Pair[1]] = @{ Ch = "$($Rd.channel)"; W = "$($Rd.width)"; Mode = "$($Rd.txPowerMode)"; Tx = $Rd.txPower; On = $Rd.enabled; Channels = $Chs; Widths = $Wds }
+            if ($Pair[1] -eq "5" -and $Chs.Count) { $Ch5Sets += , $Chs }
+            if ($Pair[1] -eq "5" -and $Wds.Count) { $W5Sets += , $Wds }
             if ("$($Rd.txPower)" -match '^\d+$') { $A[$Pair[2]] = "$($Rd.txPower)"; $NTx++ }
         }
         $N++
     }
     if ($J.country) { $script:Wplan.OmadaCountry = "$($J.country)" }
+    # channels every AP of the site may use on 5 GHz (intersection) — the planner takes these instead of the country table
+    if ($Ch5Sets.Count) { $I = @($Ch5Sets[0]); foreach ($Set in $Ch5Sets) { $I = @($I | Where-Object { $Set -contains $_ }) }; $script:Wplan.OmadaCh5 = @($I | Sort-Object) }
+    if ($W5Sets.Count) { $I = @($W5Sets[0]); foreach ($Set in $W5Sets) { $I = @($I | Where-Object { $Set -contains $_ }) }; $script:Wplan.OmadaW5 = @($I | Sort-Object) }
     if ($J.omadaSite) { $script:Wplan.OmadaSite = "$($J.omadaSite)" }
     $script:WplanLastReport = $null
     Save-Wplan; Update-WhPrep
-    Show-Toast ("Из Omada: точек {0}, мощностей {1}{2}{3}" -f $N, $NTx, $(if ($J.country) { ", страна $($J.country)" }), $(if ($Miss.Count) { " · не сопоставлены: $($Miss -join ', ')" })) $(if ($Miss.Count) { "warn" } else { "info" })
+    Show-Toast ("Из Omada: точек {0}, мощностей {1}{2}{3}{4}" -f $N, $NTx, $(if ($J.country) { ", страна $($J.country)" }), $(if ($Ch5Sets.Count) { ", каналов 5 ГГц доступно $(@($script:Wplan.OmadaCh5).Count)" } else { " · нет списка каналов (channels) — план возьмёт каналы по стране" }), $(if ($Miss.Count) { " · не сопоставлены: $($Miss -join ', ')" })) $(if ($Miss.Count -or -not $Ch5Sets.Count) { "warn" } else { "info" })
 }
 
 # air vs the calculated plan: channel and width per AP and band
