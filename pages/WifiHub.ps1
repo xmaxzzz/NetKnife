@@ -209,7 +209,8 @@ function Update-WhPrep {
         $Nm = $(if ($A -and $A.Name) { $A.Name } elseif ($R.Name) { $R.Name } else { "AP " + $K })
         $Tx = $(if ($A -and ("$($A.Tx24)" -or "$($A.Tx5)")) { "2.4: $(if ("$($A.Tx24)") { $A.Tx24 } else { '?' }) · 5: $(if ("$($A.Tx5)") { $A.Tx5 } else { '?' }) dBm" } else { "мощность не указана" })
         $Air = Format-WplanAir $A
-        [pscustomobject]@{ Key = $K; NoTx = (-not ($A -and ("$($A.Tx24)" -or "$($A.Tx5)"))); Label = ("{0,-24} {1,-16} {2,-18} {3,-34} {4}" -f $Nm, $R.Ip, $R.Mac, $Tx, $(if ($Air) { "эфир: $Air" } else { "" })) }
+        if ($A -and $A.Omada) { $Om = @(foreach ($Bb in @("2.4", "5")) { $X = $A.Omada[$Bb]; if ($X) { "$Bb к$($X.Ch)/$($X.W)$(if ($X.Mode -and $X.Mode -ne 'custom') { " $($X.Mode)" })" } }) -join " · "; if ($Om) { $Air = "Omada: $Om" } }
+        [pscustomobject]@{ Key = $K; NoTx = (-not ($A -and ("$($A.Tx24)" -or "$($A.Tx5)"))); Label = ("{0,-24} {1,-16} {2,-18} {3,-34} {4}" -f $Nm, $R.Ip, $R.Mac, $Tx, $(if ($Air -like "Omada:*") { $Air } elseif ($Air) { "эфир: $Air" } else { "" })) }
     }
     $Ui.WhAps.ItemsSource = @($List); $Ui.WhAps.DisplayMemberPath = "Label"
     # readiness
@@ -224,7 +225,8 @@ function Update-WhPrep {
     $C += $(if ($NAp) { "✔ точек: $NAp" } else { "✖ точки не найдены — «Обновить с роутера»" })
     $C += $(if ($NAp -and $NTx -eq $NAp) { "✔ мощности указаны у всех" } elseif ($NAp) { "▲ мощность указана у $NTx из $NAp — «CSV для мощностей»: впиши их из Omada одной таблицей" } else { "" })
     $C += $(if ($NAp -and $NAir -eq $NAp) { "✔ каналы и ширина из эфира — у всех" } elseif ($NAp) { "▲ из эфира прочитано $NAir из $NAp точек — дальние видны с прогулки или если подойти ближе и нажать «Считать из эфира»" } else { "" })
-    if ($script:Wplan.AirCountry -and $script:Wplan.AirCountry -ne "RU") { $C += "▲ страна сайта в эфире: $($script:Wplan.AirCountry) — объект в России? Site Settings → Country/Region (влияет на доступные каналы 5 ГГц)" }
+    if ($script:Wplan.OmadaCountry -and $script:Wplan.OmadaCountry -ne "RU") { $C += "▲ страна сайта в Omada: $($script:Wplan.OmadaCountry) — объект в России? Site Settings → Country/Region" }
+    elseif ($script:Wplan.AirCountry -and $script:Wplan.AirCountry -ne "RU") { $C += "▲ страна сайта в эфире: $($script:Wplan.AirCountry) — объект в России? Site Settings → Country/Region (влияет на доступные каналы 5 ГГц)" }
     $Fl = @(@($script:Wplan.Aps.Values) | Where-Object { $_.Air })
     if ($Fl.Count) {
         $Kv = "11k $(@($Fl | Where-Object { $_.Air.K }).Count)/$($Fl.Count) · 11v $(@($Fl | Where-Object { $_.Air.V }).Count)/$($Fl.Count) · 11r $(@($Fl | Where-Object { $_.Air.R }).Count)/$($Fl.Count)"
@@ -356,6 +358,130 @@ function Import-WhPowerCsv {
     $script:WplanLastReport = $null
     Save-Wplan; Update-WhPrep
     Show-Toast "Мощности загружены: $N точек$(if ($Miss.Count) { " · не опознаны: $($Miss -join ', ')" })" $(if ($Miss.Count) { "warn" } else { "info" })
+}
+
+# ---------------------------------------------------------------- exchange with the engineer's Omada agent
+# NetKnife never talks to the controller. The engineer's own agent (MCP connector to Omada) reads/applies; the
+# exchange is a JSON document «netknife-omada/1» (docs\OMADA-EXCHANGE.md): kind "state" comes from Omada,
+# kind "plan" goes to Omada. Transport: clipboard (any chat agent) or a file in Documents\NetKnife\omada.
+
+function Get-WhOmadaDir {
+    $D = Join-Path ([Environment]::GetFolderPath("MyDocuments")) "NetKnife\omada"
+    if (-not (Test-Path $D)) { New-Item -ItemType Directory -Path $D -Force | Out-Null }
+    return $D
+}
+function Get-WhOmadaFile { param([string]$Kind) return Join-Path (Get-WhOmadaDir) (("{0} — {1}.json" -f $script:Wplan.Site, $Kind) -replace '[\\/:*?"<>|]', '_') }
+function ConvertTo-WhOmadaMac { param([string]$M) if (-not $M) { return "" }; return ($M.ToUpper() -replace '[:\.]', '-') }
+
+function Get-WhOmadaPlan {
+    $R = $script:WplanLastReport
+    if (-not $R -or $R.Error) { Use-WplanSite; $R = Invoke-WplanCalc; $script:WplanLastReport = $R }
+    if (-not $R -or $R.Error) { return $null }
+    $Rows = @{}; foreach ($X in @(Get-WhApRows)) { $Rows[$X.Key] = $X }
+    $Aps = [ordered]@{}
+    foreach ($B in @("2.4", "5")) {
+        if (-not $R.Bands.Contains($B)) { continue }
+        $P = $R.Bands[$B]; $Rb = $(if ($B -eq "2.4") { "2g" } else { "5g" })
+        foreach ($K in $P.Keys) {
+            $A = $P.Aps[$K]; $Ap = $script:Wplan.Aps[$K]
+            if (-not $Aps.Contains($K)) {
+                $Mac = $(if ($Rows[$K] -and $Rows[$K].Mac) { $Rows[$K].Mac } elseif ($Ap -and $Ap.Mac) { $Ap.Mac } else { "" })
+                $Aps[$K] = [ordered]@{ name = (Get-WplanApName $K); mac = (ConvertTo-WhOmadaMac $Mac); radios = [ordered]@{}; current = [ordered]@{} }
+            }
+            $Ch = $P.Channels.Assign[$K] | Select-Object -First 1
+            $Aps[$K].radios[$Rb] = [ordered]@{ channel = $(if ($Ch) { [int]$Ch } else { $null }); width = $(if ($B -eq "2.4") { 20 } else { [int]$P.Channels.Width }); txPowerMode = $(if ($null -ne $A.Rec) { "custom" } else { $null }); txPower = $(if ($null -ne $A.Rec) { [int]$A.Rec } else { $null }) }
+            $Cur = $(if ($Ap -and $Ap.Omada) { $Ap.Omada[$B] } else { $null }); $Air = $(if ($Ap -and $Ap.Air) { $Ap.Air[$B] } else { $null })
+            $Aps[$K].current[$Rb] = [ordered]@{ channel = $(if ($Cur) { $Cur.Ch } elseif ($Air) { $Air.Ch } else { $null }); width = $(if ($Cur) { $Cur.W } elseif ($Air) { $Air.W } else { $null }); txPower = $(if ($null -ne $A.Cur) { [int]$A.Cur } else { $null }) }
+        }
+    }
+    return [ordered]@{ format = "netknife-omada/1"; kind = "plan"; site = $script:Wplan.Site; omadaSite = "$($script:Wplan.OmadaSite)"; generated = (Get-Date).ToString("yyyy-MM-ddTHH:mm:sszzz"); aps = @($Aps.Values) }
+}
+
+function Get-WhOmadaTaskText {
+    param($Plan, [string]$PlanFile)
+    $Site = $(if ($script:Wplan.OmadaSite) { $script:Wplan.OmadaSite } else { $script:Wplan.Site })
+    $StateFile = Get-WhOmadaFile "state"; $BackupFile = Get-WhOmadaFile "backup"
+    $Spec = ""; $Doc = Join-Path $PSScriptRoot "..\docs\OMADA-EXCHANGE.md"; if (Test-Path $Doc) { $Spec = Get-Content $Doc -Raw -Encoding UTF8 }
+    return @"
+ЗАДАЧА ДЛЯ АГЕНТА С MCP-КОННЕКТОРОМ OMADA · объект «$($script:Wplan.Site)» (сайт Omada: «$Site»)
+
+Работаем в формате netknife-omada/1 (описание в конце). NetKnife к контроллеру не подключается — всё в Omada делаешь ты, по шагам ниже.
+
+ШАГ 1. ВЫГРУЗКА ТЕКУЩИХ НАСТРОЕК (только чтение, ничего не менять)
+Собери по всем точкам доступа сайта: name, mac (AA-BB-CC-DD-EE-FF), ip, model и для каждого радио (2g, 5g, 6g если есть): enabled, channel (число или "auto"), width (20/40/80/160 или "auto"), txPowerMode (low/medium/high/custom/auto), txPower (dBm). Добавь country сайта. Верни один JSON с "kind": "state" — если можешь писать файлы, сохрани в
+  $StateFile
+и в любом случае выведи JSON целиком одним блоком, чтобы я скопировал его в NetKnife («Загрузить из Omada»).
+
+ШАГ 2. ПРИМЕНЕНИЕ ПЛАНА — ТОЛЬКО ПОСЛЕ МОЕГО ЯВНОГО «ДА»
+План ниже (kind "plan"; файл: $PlanFile). Для каждой точки (сопоставляй по mac, если не нашёл — по name) сравни radios плана с текущими настройками в Omada и покажи таблицу «точка · диапазон · канал/ширина/мощность: было → станет». Ничего не меняй, пока я не подтвержу.
+После подтверждения:
+  а) сохрани текущие значения радио всех точек (как в шаге 1) в $BackupFile — это откат;
+  б) выставляй только поля из radios плана: channel, width, мощность (режим Custom, значение txPower). Поле null или отсутствует — не трогай. SSID, настройки сайта, другие устройства — не менять;
+  в) по одной точке; после каждой перечитай её настройки и сверь; при ошибке остановись и сообщи.
+
+ШАГ 3. ПРОВЕРКА
+После применения повтори шаг 1 (новый JSON "kind": "state"), чтобы NetKnife сверил результат.
+
+ПЛАН (kind "plan"):
+$($Plan | ConvertTo-Json -Depth 8)
+
+ОПИСАНИЕ ФОРМАТА:
+$Spec
+"@
+}
+
+function Copy-WhOmadaTask {
+    if (-not $script:Wplan) { return }
+    $Plan = Get-WhOmadaPlan
+    if (-not $Plan) { Show-Toast "Нет расчёта — сначала замеры (шаг «Прогулка до»)" "warn"; return }
+    $F = Get-WhOmadaFile "plan"
+    [IO.File]::WriteAllText($F, ($Plan | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
+    Copy-Text (Get-WhOmadaTaskText $Plan $F) "задача для агента Omada (план внутри)"
+    Show-Toast "Задача скопирована — вставь её агенту с MCP Omada. План также в файле: $F"
+}
+
+function Import-WhOmadaState {
+    param([string]$Text = "")
+    if (-not $script:Wplan) { return }
+    $Txt = $Text
+    if (-not $Txt) { try { if ([System.Windows.Clipboard]::ContainsText()) { $Txt = [System.Windows.Clipboard]::GetText() } } catch { } }
+    if ($Txt -notmatch 'netknife-omada/1') {
+        $Def = Get-WhOmadaFile "state"
+        $D = New-Object Microsoft.Win32.OpenFileDialog; $D.Title = "Выгрузка из Omada (netknife-omada/1)"; $D.Filter = "JSON (*.json;*.txt)|*.json;*.txt"; $D.InitialDirectory = (Get-WhOmadaDir)
+        if (Test-Path $Def) { $D.FileName = Split-Path $Def -Leaf }
+        if (-not $D.ShowDialog($script:Win)) { return }
+        $Txt = [IO.File]::ReadAllText($D.FileName, [Text.Encoding]::UTF8)
+    }
+    # the agent may wrap the JSON in prose or ```json fences
+    $T = $Txt -replace '(?s)```(?:json)?\s*(.*?)```', '$1'
+    $S = $T.IndexOf('{'); $E = $T.LastIndexOf('}')
+    $J = $null; if ($S -ge 0 -and $E -gt $S) { try { $J = $T.Substring($S, $E - $S + 1) | ConvertFrom-Json -AsHashtable } catch { } }
+    if (-not $J -or "$($J.format)" -ne "netknife-omada/1") { Show-Toast "Это не выгрузка netknife-omada/1 — попроси агента вернуть JSON по шагу 1 задачи" "warn"; return }
+    if ("$($J.kind)" -ne "state") { Show-Toast "В файле kind «$($J.kind)», а нужен «state» — это выгрузка из Omada (шаг 1)" "warn"; return }
+    $ByName = @{}; foreach ($X in @(Get-WhApRows)) { $ByName[$X.Name.ToLower()] = $X.Key }
+    $N = 0; $NTx = 0; $Miss = @(); $Now = Get-Date -Format "yyyy-MM-dd HH:mm"
+    foreach ($Ap in @($J.aps)) {
+        $K = $(if ($Ap.mac) { Get-WplanKey "$($Ap.mac)" } else { "" })
+        if (-not $K -or -not ($script:Wplan.Aps.ContainsKey($K) -or ($ByName.Values -contains $K))) { if ($Ap.name -and $ByName[("$($Ap.name)").ToLower()]) { $K = $ByName[("$($Ap.name)").ToLower()] } }
+        if (-not $K) { $Miss += "$($Ap.name)"; continue }
+        if (-not $script:Wplan.Aps.ContainsKey($K)) { $script:Wplan.Aps[$K] = @{ Name = ""; Tx24 = ""; Tx5 = ""; Bssids = @() } }
+        $A = $script:Wplan.Aps[$K]
+        if (-not $A.Name -and $Ap.name) { $A.Name = "$($Ap.name)" }
+        if ($Ap.mac) { $A.Mac = ConvertTo-WhOmadaMac "$($Ap.mac)" }
+        $A.Omada = @{ Model = "$($Ap.model)"; T = $Now }
+        foreach ($Pair in @(@("2g", "2.4", "Tx24"), @("5g", "5", "Tx5"))) {
+            $Rd = $(if ($Ap.radios) { $Ap.radios[$Pair[0]] } else { $null })
+            if (-not $Rd) { continue }
+            $A.Omada[$Pair[1]] = @{ Ch = "$($Rd.channel)"; W = "$($Rd.width)"; Mode = "$($Rd.txPowerMode)"; Tx = $Rd.txPower; On = $Rd.enabled }
+            if ("$($Rd.txPower)" -match '^\d+$') { $A[$Pair[2]] = "$($Rd.txPower)"; $NTx++ }
+        }
+        $N++
+    }
+    if ($J.country) { $script:Wplan.OmadaCountry = "$($J.country)" }
+    if ($J.omadaSite) { $script:Wplan.OmadaSite = "$($J.omadaSite)" }
+    $script:WplanLastReport = $null
+    Save-Wplan; Update-WhPrep
+    Show-Toast ("Из Omada: точек {0}, мощностей {1}{2}{3}" -f $N, $NTx, $(if ($J.country) { ", страна $($J.country)" }), $(if ($Miss.Count) { " · не сопоставлены: $($Miss -join ', ')" })) $(if ($Miss.Count) { "warn" } else { "info" })
 }
 
 # air vs the calculated plan: channel and width per AP and band
@@ -523,6 +649,8 @@ function Initialize-WifiHub {
     $Ui.WhCsvOut.Add_Click({ Export-WhPowerCsv })
     $Ui.WhCsvIn.Add_Click({ Import-WhPowerCsv })
     $Ui.WhVerify.Add_Click({ Start-WhVerify })
+    $Ui.WhOmadaIn.Add_Click({ Import-WhOmadaState })
+    $Ui.WhOmadaTask.Add_Click({ Copy-WhOmadaTask })
     $Ui.WhCopySheet.Add_Click({ Use-WplanSite; $T = Get-WplanSheet; if ($T) { Copy-Text $T "лист для Omada" } else { Show-Toast "Нет расчёта — сначала замеры" "warn" } })
     $Ui.WhApplied.Add_Click({ if ($script:Wplan) { (Get-WhState).Applied = [bool]$Ui.WhApplied.IsChecked; Save-Wplan; Update-WhStepper } })
     $Ui.WhAdopt.Add_Click({

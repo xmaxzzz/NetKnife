@@ -915,7 +915,7 @@
                                     <Button x:Name="WpAi" Style="{StaticResource Btn}" Padding="12,7" Margin="8,0,0,0" ToolTip="Отправить замеры и расчёт в Claude (твой API-ключ) за проверкой и советом">
                                         <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE99A;" Style="{StaticResource Glyph}"/><TextBlock Text="Совет ИИ"/></StackPanel>
                                     </Button>
-                                    <CheckBox x:Name="WpDfs" Style="{StaticResource Switch}" Content="DFS-каналы 5 ГГц" Margin="16,0,0,0" VerticalAlignment="Center" ToolTip="52–144: больше чистых каналов, но точка уходит с канала при радаре (пауза ~1 мин)"/>
+                                    <CheckBox x:Name="WpDfs" Style="{StaticResource Switch}" Content="Без DFS" Margin="16,0,0,0" VerticalAlignment="Center" ToolTip="По умолчанию DFS-каналы (52–144) берутся, только если без них каналов на все точки мало. Включи, чтобы не использовать DFS совсем (при радаре точка уходит с канала на минуту)."/>
                                 </StackPanel>
                                 <TextBox x:Name="WpReport" Style="{StaticResource Code}" FontSize="12" TextWrapping="NoWrap" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Text=""/>
                             </DockPanel>
@@ -1013,6 +1013,9 @@
                                             <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8A5;" Style="{StaticResource Glyph}"/><TextBlock Text="Лист для Omada"/></StackPanel>
                                         </Button>
                                         <CheckBox x:Name="WhApplied" Style="{StaticResource Switch}" Content="Внёс значения в Omada" VerticalAlignment="Center" Margin="0,0,14,0"/>
+                                        <Button x:Name="WhOmadaTask" Style="{StaticResource Btn}" Padding="12,6" Margin="0,0,8,0" ToolTip="Копирует задачу для твоего агента с MCP Omada: план (канал, ширина, мощность по точкам) + как применить и выгрузить результат">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE99A;" Style="{StaticResource Glyph}"/><TextBlock Text="Задача для агента Omada"/></StackPanel>
+                                        </Button>
                                         <Button x:Name="WhVerify" Style="{StaticResource Btn}" Padding="12,6" Margin="0,0,8,0" ToolTip="Сверить каналы и ширину в эфире с планом — видно, что применилось в Omada">
                                             <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9D5;" Style="{StaticResource Glyph}"/><TextBlock Text="Проверить внесённое"/></StackPanel>
                                         </Button>
@@ -1080,6 +1083,7 @@
                                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                                                     <Button x:Name="WhReadAir" Style="{StaticResource GhostBtn}" Padding="10,4" Margin="0,0,4,0" ToolTip="Канал и ширина каждой точки, 802.11k/v/r, безопасность, страна — из служебных кадров точек (контроллер не нужен)"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE701;" Style="{StaticResource Glyph}" FontSize="12"/><TextBlock Text="Считать из эфира"/></StackPanel></Button>
                                                     <Button x:Name="WhCsvOut" Style="{StaticResource GhostBtn}" Padding="10,4" Margin="0,0,4,0" ToolTip="Таблица точек с каналами и шириной из эфира — впиши мощности из Omada и загрузи обратно"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74E;" Style="{StaticResource Glyph}" FontSize="12"/><TextBlock Text="CSV для мощностей"/></StackPanel></Button>
+                                                    <Button x:Name="WhOmadaIn" Style="{StaticResource GhostBtn}" Padding="10,4" Margin="0,0,4,0" ToolTip="Ответ агента с MCP Omada (формат netknife-omada/1): из буфера обмена или из файла — мощности, каналы и ширина встанут в план"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE896;" Style="{StaticResource Glyph}" FontSize="12"/><TextBlock Text="Загрузить из Omada"/></StackPanel></Button>
                                                     <Button x:Name="WhCsvIn" Style="{StaticResource GhostBtn}" Padding="10,4" Margin="0,0,4,0" ToolTip="Загрузить заполненную таблицу: мощности встанут в план"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B5;" Style="{StaticResource Glyph}" FontSize="12"/><TextBlock Text="Загрузить CSV"/></StackPanel></Button>
                                                     <Button x:Name="WhApsRefresh" Style="{StaticResource GhostBtn}" Padding="10,4"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" Style="{StaticResource Glyph}" FontSize="12"/><TextBlock Text="Обновить с роутера"/></StackPanel></Button>
                                                 </StackPanel>

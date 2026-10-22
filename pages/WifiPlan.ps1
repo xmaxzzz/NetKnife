@@ -91,7 +91,7 @@ function Get-WplanSites {
     return @(Get-ChildItem $script:WplanDir -Filter *.json | Sort-Object LastWriteTime -Descending | ForEach-Object { $_.BaseName })
 }
 
-function New-WplanOpt { return @{ Offset = 6; Cap5 = 20; Cap24 = 17 } }
+function New-WplanOpt { return @{ Offset = 6; Cap5 = 20; Cap24 = 17; NoDfs = $false } }
 
 function New-Wplan { param([string]$Site) return @{ Site = $Site; Ssids = @(); Aps = @{}; Merge = @{}; Points = @(); CurSeries = $script:WplanBaseSeries; Opt = (New-WplanOpt); KeyV = 2 } }
 
@@ -432,15 +432,26 @@ function Get-WplanBandPlan {
 function Get-WplanChannels {
     param($Plan, $Foreign, [switch]$Dfs)
     $B = $Plan.Band; $S = $Plan.After; $Keys = $Plan.Keys; $N = $Keys.Count
+    $Note = ""
     if ($B -eq "2.4") { $Opts = @(@(1), @(6), @(11)); $Width = 20 }
     else {
-        $Width = $(if ($N -le 2) { 80 } elseif ($N -le 6) { 40 } else { 20 })
-        $Blocks = switch ($Width) {
-            80 { @(@(36, 40, 44, 48), @(149, 153, 157, 161)) + $(if ($Dfs) { @(@(52, 56, 60, 64), @(100, 104, 108, 112), @(116, 120, 124, 128)) } else { @() }) }
-            40 { @(@(36, 40), @(44, 48), @(149, 153), @(157, 161)) + $(if ($Dfs) { @(@(52, 56), @(60, 64), @(100, 104), @(108, 112), @(116, 120), @(124, 128), @(132, 136)) } else { @() }) }
-            default { @(36, 40, 44, 48, 149, 153, 157, 161 | ForEach-Object { , @($_) }) + $(if ($Dfs) { @(52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128 | ForEach-Object { , @($_) }) } else { @() }) }
+        $Av = Get-WplanCh5Allowed
+        $Ok = { param($L) @($L | Where-Object { $Av.All -notcontains $_ }).Count -eq 0 }
+        $Pick = {
+            param([bool]$UseDfs)
+            $Set = @($Av.All | Where-Object { $UseDfs -or $Av.NoDfs -contains $_ })
+            $Q = @(@(36, 40, 44, 48), @(52, 56, 60, 64), @(100, 104, 108, 112), @(132, 136, 140, 144), @(149, 153, 157, 161)) | Where-Object { $L = $_; @($L | Where-Object { $Set -notcontains $_ }).Count -eq 0 }
+            $P2 = @(@(36, 40), @(44, 48), @(52, 56), @(60, 64), @(100, 104), @(108, 112), @(132, 136), @(140, 144), @(149, 153), @(157, 161)) | Where-Object { $L = $_; @($L | Where-Object { $Set -notcontains $_ }).Count -eq 0 }
+            return @{ Q = @($Q | ForEach-Object { , $_ }); P = @($P2 | ForEach-Object { , $_ }); S = @($Set | ForEach-Object { , @($_) }) }
         }
-        $Opts = @($Blocks | ForEach-Object { , $_ })
+        # DFS only when the non-DFS channels are too few for this many APs (or never, if the engineer said so)
+        $UseDfs = (-not $script:Wplan.Opt.NoDfs) -and (@($Av.NoDfs).Count -lt $N)
+        $C = & $Pick $UseDfs
+        # the widest width that still gives most APs a block of their own
+        if ($N -le @($C.Q).Count) { $Width = 80; $Opts = $C.Q }
+        elseif (@($C.P).Count -ge [Math]::Ceiling($N * 0.6)) { $Width = 40; $Opts = $C.P }
+        else { $Width = 20; $Opts = $C.S }
+        $Note = "каналы 5 ГГц для страны $($Av.Country): $($Av.Text)$(if ($UseDfs) { ' · DFS включён — без него каналов на ' + $N + ' точек мало' } elseif ($script:Wplan.Opt.NoDfs) { ' · DFS выключен вручную' }) · ширина $Width МГц"
     }
     $W = @{}
     foreach ($A in $Keys) { foreach ($C in $Keys) {
@@ -462,7 +473,21 @@ function Get-WplanChannels {
         }
         $Assign[$A] = $BestOpt
     }
-    return @{ Width = $Width; Assign = $Assign }
+    return @{ Width = $Width; Assign = $Assign; Note = $Note }
+}
+
+# 5 GHz channels the site may use (20 MHz primaries), by the country of the Omada site (Omada export, else the
+# beacon Country element). 120–128 (weather radar, long DFS waits) are never planned.
+function Get-WplanCh5Allowed {
+    $Cc = $(if ($script:Wplan.OmadaCountry) { "$($script:Wplan.OmadaCountry)" } elseif ($script:Wplan.AirCountry) { "$($script:Wplan.AirCountry)" } else { "" })
+    $Eu = @("DE", "FR", "IT", "ES", "NL", "BE", "AT", "PL", "CZ", "FI", "SE", "DK", "NO", "CH", "GB", "IE", "PT", "GR", "HU", "SK", "SI", "HR", "RO", "BG", "LT", "LV", "EE", "LU")
+    $L = $(if ($Cc -eq "RU") { @(36, 40, 44, 48, 52, 56, 60, 64, 132, 136, 140, 144, 149, 153, 157, 161, 165) }
+        elseif ($Eu -contains $Cc) { @(36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 132, 136, 140) }
+        elseif ($Cc -in @("US", "CA")) { @(36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 132, 136, 140, 144, 149, 153, 157, 161, 165) }
+        else { @(36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 132, 136, 149, 153, 157, 161) })
+    $Nd = @($L | Where-Object { $_ -le 48 -or $_ -ge 149 })
+    $Txt = (@($L | ForEach-Object { "$_" }) -join ",") -replace '36,40,44,48', '36–48' -replace '52,56,60,64', '52–64' -replace '100,104,108,112,116', '100–116' -replace '132,136,140,144', '132–144' -replace '132,136,140', '132–140' -replace '149,153,157,161,165', '149–165' -replace '149,153,157,161', '149–161'
+    return @{ Country = $(if ($Cc) { $Cc } else { "не известна" }); All = $L; NoDfs = $Nd; Text = $Txt }
 }
 
 function Format-WplanDelta { param([int]$D) if ($D -gt 0) { return "+$D dB" } elseif ($D -lt 0) { return "$D dB" } else { return "0" } }
@@ -487,7 +512,7 @@ function Invoke-WplanCalc {
     $P24 = Get-WplanBandPlan $Mx "2.4" $P5
     foreach ($P in @($P5, $P24)) {
         if (-not $P) { continue }
-        $P.Channels = Get-WplanChannels $P $Mx.Foreign -Dfs:([bool]$Ui.WpDfs.IsChecked)
+        $P.Channels = Get-WplanChannels $P $Mx.Foreign
         $R.Bands[$P.Band] = $P
     }
     $script:WplanLastReport = $R
@@ -532,6 +557,7 @@ function Get-WplanReport {
         $P = $R.Bands[$B]
         [void]$Out.AppendLine("")
         [void]$Out.AppendLine("━━━ $B ГГц ━━━")
+        if ($P.Channels.Note) { [void]$Out.AppendLine($P.Channels.Note) }
         [void]$Out.Append((Format-WplanMatrix $P $P.Before $P.TopB "СЕЙЧАС"))
         [void]$Out.AppendLine("")
         [void]$Out.Append((Format-WplanMatrix $P $P.After $P.TopA "ПРОГНОЗ после правок"))
@@ -794,6 +820,7 @@ function Refresh-Wplan {
     $script:WplanPointItems.Clear()
     $script:WplanApItems.Clear()
     if (-not $script:Wplan) { return }
+    if ($Ui.WpDfs) { $Ui.WpDfs.IsChecked = [bool]$script:Wplan.Opt.NoDfs }
     $i = 0
     foreach ($P in @($script:Wplan.Points)) {
         if ($P.Series -eq $script:Wplan.CurSeries) {
@@ -888,6 +915,7 @@ function Initialize-WifiPlanPage {
     $Ui.WpMeasure.Add_Click({ Start-WplanMeasure })
     $Ui.WpRoom.Add_KeyDown({ param($S, $E) if ("$($E.Key)" -eq "Return") { Start-WplanMeasure; $E.Handled = $true } })
     $Ui.WpCalc.Add_Click({ Use-WplanSite; $Ui.WpReport.Text = Get-WplanReport })
+    $Ui.WpDfs.Add_Click({ if ($script:Wplan) { $script:Wplan.Opt.NoDfs = [bool]$Ui.WpDfs.IsChecked; Save-Wplan; $script:WplanLastReport = $null; Use-WplanSite; $Ui.WpReport.Text = Get-WplanReport } })
     $Ui.WpCompare.Add_Click({ Use-WplanSite; $Ui.WpReport.Text = Format-WplanCompare })
     $Ui.WpHtml.Add_Click({ Use-WplanSite; Export-WplanHtml })
     $Ui.WpCopy.Add_Click({ if ($Ui.WpReport.Text) { Copy-Text $Ui.WpReport.Text "отчёт" } })
