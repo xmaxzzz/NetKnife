@@ -109,14 +109,20 @@ $script:WhisperRunBody = {
         $Psi.StandardErrorEncoding = [Text.Encoding]::UTF8; $Psi.StandardOutputEncoding = [Text.Encoding]::UTF8
         $P = [System.Diagnostics.Process]::Start($Psi)
         $OutT = $P.StandardOutput.ReadToEndAsync()
+        $NoMem = $false
         while (-not $P.StandardError.EndOfStream) {
             if ($Ctl.Stop) { try { $P.Kill() } catch { }; return }
             $Ln = $P.StandardError.ReadLine()
             if ($Ln -match 'progress\s*=\s*(\d+)%') { $Q.Enqueue(@{ Type = "wtp"; Pct = [int]$Matches[1] }) }
+            if ($Ln -match 'failed to allocate') { $NoMem = $true }
         }
         $P.WaitForExit()
         $J = "$OutBase.json"
-        if ($P.ExitCode -ne 0 -or -not (Test-Path $J)) { $Q.Enqueue(@{ Type = "wtx"; Error = "whisper-cli код $($P.ExitCode)" }); return }
+        if ($P.ExitCode -ne 0 -or -not (Test-Path $J)) {
+            # Windows refused memory (commit limit reached: many programs open, small page file) — the caller offers the light model
+            if ($NoMem) { $Os = Get-CimInstance Win32_OperatingSystem; $Q.Enqueue(@{ Type = "wtx"; NoMem = $true; Error = ("Windows не дал памяти для распознавания: свободно {0:N1} ГБ виртуальной памяти" -f ($Os.FreeVirtualMemory / 1MB)) }); return }
+            $Q.Enqueue(@{ Type = "wtx"; Error = "whisper-cli код $($P.ExitCode)" }); return
+        }
         $T = (Get-Content $J -Raw -Encoding UTF8 | ConvertFrom-Json).transcription
         $Words = @(foreach ($S in @($T)) { $Tx = "$($S.text)".Trim(); if ($Tx) { @{ T0 = [double]$S.offsets.from / 1000; T1 = [double]$S.offsets.to / 1000; Text = $Tx } } })
         $Q.Enqueue(@{ Type = "wtx"; Words = $Words })
@@ -126,7 +132,7 @@ $script:WhisperRunBody = {
 function Start-WhisperTranscribe {
     param([string]$Wav, [string]$Prompt, [scriptblock]$OnProgress, [scriptblock]$OnDone)
     $script:WhisperRunCb = @{ Progress = $OnProgress; Done = $OnDone }
-    $Th = [Math]::Max(2, [Math]::Min(8, [Environment]::ProcessorCount - 2))
+    $Th = [Math]::Max(2, [Math]::Min(4, [Environment]::ProcessorCount - 2))   # more threads = more buffers, little gain on short walks
     [void](Start-Worker -Name "whisper-run" -Replace -Body $script:WhisperRunBody -ArgList @((Get-WhisperExe), (Get-WhisperModelPath), $Wav, $Prompt, $Th) -OnMessage {
         param($X)
         $Cb = $script:WhisperRunCb

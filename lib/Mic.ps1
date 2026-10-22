@@ -1,111 +1,60 @@
-# Microphone recorder for the voice-annotated Wi-Fi walk: winmm waveIn, 16 kHz mono 16-bit PCM (what whisper.cpp
-# wants), written straight to a WAV file by a background thread (no window message loop needed — MCI "record"
-# hangs without one). Peak gives a live level meter; Started is the wall-clock time of sample 0, so whisper's
-# segment offsets map back to the Wi-Fi samples.
+# Microphone for the voice-annotated Wi-Fi walk. The capture itself runs in a helper process — lib\MicRec.ps1
+# under Windows PowerShell 5.1 (WASAPI → 16 kHz mono WAV): PowerShell 7 from the Microsoft Store is a packaged app
+# without the microphone capability, so Windows silently denies it the microphone (no prompt, E_ACCESSDENIED).
+# NetKnife.MicProc keeps the old recorder's surface: Start(path) / Stop() / Started / Peak / Seconds / Error.
 
-if (-not ("NetKnife.MicRec" -as [type])) {
+$script:MicHelper = Join-Path $PSScriptRoot "MicRec.ps1"
+
+if (-not ("NetKnife.MicProc" -as [type])) {
 Add-Type -TypeDefinition @"
 using System;
-using System.IO;
-using System.Runtime.InteropServices;
+using System.Diagnostics;
 using System.Threading;
 
 namespace NetKnife {
-    public class MicRec {
-        [StructLayout(LayoutKind.Sequential)] struct WAVEFORMATEX { public ushort wFormatTag, nChannels; public uint nSamplesPerSec, nAvgBytesPerSec; public ushort nBlockAlign, wBitsPerSample, cbSize; }
-        [StructLayout(LayoutKind.Sequential)] struct WAVEHDR { public IntPtr lpData; public uint dwBufferLength, dwBytesRecorded; public IntPtr dwUser; public uint dwFlags, dwLoops; public IntPtr lpNext, reserved; }
-        [DllImport("winmm.dll")] static extern int waveInOpen(out IntPtr h, int dev, ref WAVEFORMATEX fmt, IntPtr cb, IntPtr inst, int flags);
-        [DllImport("winmm.dll")] static extern int waveInPrepareHeader(IntPtr h, IntPtr hdr, int size);
-        [DllImport("winmm.dll")] static extern int waveInUnprepareHeader(IntPtr h, IntPtr hdr, int size);
-        [DllImport("winmm.dll")] static extern int waveInAddBuffer(IntPtr h, IntPtr hdr, int size);
-        [DllImport("winmm.dll")] static extern int waveInStart(IntPtr h);
-        [DllImport("winmm.dll")] static extern int waveInStop(IntPtr h);
-        [DllImport("winmm.dll")] static extern int waveInReset(IntPtr h);
-        [DllImport("winmm.dll")] static extern int waveInClose(IntPtr h);
-        [DllImport("winmm.dll")] static extern int waveInGetNumDevs();
-        const int Rate = 16000, BufBytes = 8000, NBuf = 8;   // 0.25 s per buffer
-        const uint WHDR_DONE = 1;
-
-        IntPtr h; IntPtr[] hdrs = new IntPtr[NBuf]; IntPtr[] data = new IntPtr[NBuf];
-        FileStream fs; Thread th; volatile bool stop;
-        public DateTime Started; public long Bytes; public volatile int Peak; public string Error = "";
-        public double Seconds { get { return Bytes / 2.0 / Rate; } }
-        public static int Devices() { return waveInGetNumDevs(); }
+    public class MicProc {
+        readonly string helper; Process p; readonly ManualResetEventSlim ready = new ManualResetEventSlim(false);
+        public DateTime Started; public volatile int Peak; public string Error = ""; public double Done = -1;
+        public double Seconds { get { return Done >= 0 ? Done : (Started == default(DateTime) ? 0 : (DateTime.Now - Started).TotalSeconds); } }
+        public MicProc(string helperPath) { helper = helperPath; }
 
         public bool Start(string path) {
-            if (waveInGetNumDevs() < 1) { Error = "нет микрофона"; return false; }
-            var f = new WAVEFORMATEX { wFormatTag = 1, nChannels = 1, nSamplesPerSec = Rate, nAvgBytesPerSec = Rate * 2, nBlockAlign = 2, wBitsPerSample = 16, cbSize = 0 };
-            int r = waveInOpen(out h, -1, ref f, IntPtr.Zero, IntPtr.Zero, 0);
-            if (r != 0) { Error = "waveInOpen " + r; return false; }
-            fs = new FileStream(path, FileMode.Create, FileAccess.Write);
-            fs.Write(new byte[44], 0, 44);   // header is written on Stop
-            int hs = Marshal.SizeOf(typeof(WAVEHDR));
-            for (int i = 0; i < NBuf; i++) {
-                data[i] = Marshal.AllocHGlobal(BufBytes);
-                hdrs[i] = Marshal.AllocHGlobal(hs);
-                Marshal.StructureToPtr(new WAVEHDR { lpData = data[i], dwBufferLength = BufBytes }, hdrs[i], false);
-                waveInPrepareHeader(h, hdrs[i], hs);
-                waveInAddBuffer(h, hdrs[i], hs);
-            }
-            stop = false; Bytes = 0;
-            r = waveInStart(h);
-            if (r != 0) { Error = "waveInStart " + r; Cleanup(); return false; }
-            Started = DateTime.Now;
-            th = new Thread(Loop) { IsBackground = true }; th.Start();
-            return true;
+            try {
+                var psi = new ProcessStartInfo("powershell.exe");
+                psi.Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + helper + "\" -Out \"" + path + "\"";
+                psi.UseShellExecute = false; psi.CreateNoWindow = true;
+                psi.RedirectStandardInput = true; psi.RedirectStandardOutput = true; psi.RedirectStandardError = true;
+                p = Process.Start(psi);
+                var t = new Thread(Read) { IsBackground = true }; t.Start();
+                p.ErrorDataReceived += (s, e) => { if (!string.IsNullOrEmpty(e.Data) && Error == "") Error = e.Data; };
+                p.BeginErrorReadLine();
+                // the helper compiles its WASAPI code first (~1–3 s)
+                if (!ready.Wait(15000)) { Error = "микрофон не ответил за 15 с"; Kill(); return false; }
+                if (Started == default(DateTime)) { Kill(); return false; }
+                return true;
+            } catch (Exception e) { Error = e.Message; return false; }
         }
 
-        void Loop() {
-            int hs = Marshal.SizeOf(typeof(WAVEHDR));
-            var buf = new byte[BufBytes];
-            while (!stop) {
-                bool any = false;
-                for (int i = 0; i < NBuf; i++) {
-                    var w = (WAVEHDR)Marshal.PtrToStructure(hdrs[i], typeof(WAVEHDR));
-                    if ((w.dwFlags & WHDR_DONE) == 0) continue;
-                    any = true;
-                    int n = (int)w.dwBytesRecorded;
-                    if (n > 0) {
-                        Marshal.Copy(w.lpData, buf, 0, n);
-                        lock (this) { fs.Write(buf, 0, n); Bytes += n; }
-                        int pk = 0; for (int k = 0; k + 1 < n; k += 2) { int v = Math.Abs((int)BitConverter.ToInt16(buf, k)); if (v > pk) pk = v; }
-                        Peak = pk;
-                    }
-                    if (stop) break;
-                    w.dwFlags &= ~WHDR_DONE; w.dwBytesRecorded = 0;
-                    Marshal.StructureToPtr(w, hdrs[i], false);
-                    waveInAddBuffer(h, hdrs[i], hs);
+        void Read() {
+            try {
+                string l;
+                while ((l = p.StandardOutput.ReadLine()) != null) {
+                    if (l == "START") { Started = DateTime.Now; ready.Set(); }
+                    else if (l.StartsWith("LVL ")) { int v; if (int.TryParse(l.Substring(4), out v)) Peak = v; }
+                    else if (l.StartsWith("DONE ")) { double d; if (double.TryParse(l.Substring(5), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out d)) Done = d; }
+                    else if (l.StartsWith("ERR ")) { Error = l.Substring(4); ready.Set(); }
                 }
-                if (!any) Thread.Sleep(20);
-            }
+            } catch { }
+            ready.Set();
         }
 
         public void Stop() {
-            if (h == IntPtr.Zero) return;
-            stop = true;
-            if (th != null) th.Join(1000);
-            waveInStop(h); waveInReset(h);
-            Cleanup();
+            if (p == null) return;
+            try { p.StandardInput.WriteLine("STOP"); p.StandardInput.Flush(); } catch { }
+            if (!p.WaitForExit(8000)) Kill();
         }
 
-        void Cleanup() {
-            int hs = Marshal.SizeOf(typeof(WAVEHDR));
-            for (int i = 0; i < NBuf; i++) {
-                if (hdrs[i] != IntPtr.Zero) { waveInUnprepareHeader(h, hdrs[i], hs); Marshal.FreeHGlobal(hdrs[i]); hdrs[i] = IntPtr.Zero; }
-                if (data[i] != IntPtr.Zero) { Marshal.FreeHGlobal(data[i]); data[i] = IntPtr.Zero; }
-            }
-            if (h != IntPtr.Zero) { waveInClose(h); h = IntPtr.Zero; }
-            if (fs != null) {
-                lock (this) {
-                    fs.Seek(0, SeekOrigin.Begin);
-                    var bw = new BinaryWriter(fs);
-                    bw.Write(new char[] { 'R', 'I', 'F', 'F' }); bw.Write((int)(36 + Bytes)); bw.Write(new char[] { 'W', 'A', 'V', 'E' });
-                    bw.Write(new char[] { 'f', 'm', 't', ' ' }); bw.Write(16); bw.Write((short)1); bw.Write((short)1); bw.Write(Rate); bw.Write(Rate * 2); bw.Write((short)2); bw.Write((short)16);
-                    bw.Write(new char[] { 'd', 'a', 't', 'a' }); bw.Write((int)Bytes);
-                    bw.Flush(); fs.Dispose(); fs = null;
-                }
-            }
-        }
+        void Kill() { try { if (p != null && !p.HasExited) p.Kill(); } catch { } }
     }
 }
 "@

@@ -41,10 +41,13 @@ function Start-Walk {
         Clicks = [System.Collections.Generic.List[object]]::new(); Scans = [System.Collections.Generic.List[object]]::new(); Conn = [System.Collections.Generic.List[object]]::new()
         Marks = [System.Collections.Generic.List[object]]::new(); Events = @(); Words = @(); Phrases = @(); Timeline = @(); Notes = @(); ScanUntil = [DateTime]::MinValue; ScanErr = ""; CpNext = 0 }
     # microphone
-    $Mic = [NetKnife.MicRec]::new()
-    if ($Mic.Start("$Base.wav")) { $script:Walk.Mic = $Mic; $script:Walk.Wav = "$Base.wav"; $script:Walk.Started = $Mic.Started }
+    $Mic = [NetKnife.MicProc]::new($script:MicHelper)
+    $script:Win.Cursor = [System.Windows.Input.Cursors]::Wait
+    $MicOk = $Mic.Start("$Base.wav")
+    $script:Win.Cursor = $null
+    if ($MicOk) { $script:Walk.Mic = $Mic; $script:Walk.Wav = "$Base.wav"; $script:Walk.Started = $Mic.Started }
     else {
-        $Why = $(if ($Mic.Error -match 'waveInOpen 1') { "Windows не дал открыть микрофон (код 1). Проверь: Параметры → Конфиденциальность → Микрофон → «Разрешить классическим приложениям»; микрофон не занят другой программой (Телемост, диктовка)." } else { "Микрофон: $($Mic.Error)." })
+        $Why = "Микрофон не запустился: $($Mic.Error). Проверь: Параметры → Конфиденциальность → Микрофон → «Разрешить классическим приложениям»; микрофон не занят другой программой."
         if (-not (Show-Confirm "Без голоса?" "$Why Продолжить прогулку без записи — место отмечать кликами по плану?" "Без голоса")) { $script:Walk = $null; return }
     }
     # roaming monitor (router of the site, if chosen in step 1)
@@ -159,6 +162,15 @@ function Start-WalkTranscribe {
     Start-WhisperTranscribe $K.Wav (Get-WalkPrompt) { param($P) Set-WalkWhisperStatus "Расшифровка: $P%" "wait" } {
         param($X)
         $Ui.WkRetx.IsEnabled = $true
+        if ($X.NoMem -and (Get-WhisperModel) -ne "base") {
+            Set-WalkWhisperStatus "$($X.Error) — модели small не хватает" "fail"
+            if (Show-Confirm "Не хватило памяти" "$($X.Error). Модели small нужно около 1 ГБ. Можно закрыть тяжёлые программы (браузер, Telegram, Яндекс Диск) или увеличить файл подкачки и нажать «Расшифровать» — либо переключиться на лёгкую модель base (141 МБ, нужно ~0,4 ГБ; русский распознаёт хуже, но названия помещений обычно понимает)." "Лёгкая модель") {
+                $script:Settings.WhisperModel = "base"; Save-Settings
+                Install-Whisper { param($T, $Kd) Set-WalkWhisperStatus $T $Kd } { Start-WalkTranscribe }
+                return
+            }
+            Complete-Walk; return
+        }
         if ($X.Error) { Set-WalkWhisperStatus "Расшифровка не удалась: $($X.Error)" "fail"; Complete-Walk; return }
         $script:Walk.Words = @($X.Words)
         $script:Walk.Phrases = @(ConvertTo-WhisperPhrases $X.Words)
@@ -588,7 +600,7 @@ function Update-WalkLive {
     if (-not $K -or -not $K.Running) { return }
     $S = ([DateTime]::Now - $K.Started).TotalSeconds
     $Ui.WkTime.Text = Format-WalkTime $S
-    $Lv = $(if ($K.Mic) { [Math]::Min(1.0, $K.Mic.Peak / 12000.0) } else { 0 })
+    $Lv = $(if ($K.Mic) { [Math]::Min(1.0, $K.Mic.Peak / 3000.0) } else { 0 })   # laptop mic arrays are quiet
     $Ui.WkLevel.Width = [Math]::Max(2.0, $Lv * $Ui.WkLevelBox.ActualWidth)
     $Ui.WkLevel.Background = Get-Brush $(if (-not $K.Mic) { "Faint" } elseif ($Lv -gt 0.05) { "Ok" } else { "Sub" })
     $L = $(if ($script:Roam) { $script:Roam.Last } else { $null })
