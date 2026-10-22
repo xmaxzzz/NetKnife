@@ -50,13 +50,15 @@ function Show-AiKeyDialog {
 
 # Worker body: one messages call, returns text. Runs in a thread job (no UI access).
 $script:AiBody = {
-    param($Q, $Ctl, $Key, $Model, $System, $UserText, $MaxTokens)
+    param($Q, $Ctl, $Key, $Model, $System, $UserText, $MaxTokens, $ImageB64, $ImageType)
     try {
         $H = [System.Net.Http.HttpClient]::new()
         $H.Timeout = [TimeSpan]::FromSeconds(120)
         $H.DefaultRequestHeaders.Add("x-api-key", $Key)
         $H.DefaultRequestHeaders.Add("anthropic-version", "2023-06-01")
-        $Body = @{ model = $Model; max_tokens = $MaxTokens; system = $System; messages = @(@{ role = "user"; content = $UserText }) } | ConvertTo-Json -Depth 6
+        # optional picture (floor plan / walk map) goes before the text, as the API recommends
+        $Content = $(if ($ImageB64) { @(@{ type = "image"; source = @{ type = "base64"; media_type = $ImageType; data = $ImageB64 } }, @{ type = "text"; text = $UserText }) } else { $UserText })
+        $Body = @{ model = $Model; max_tokens = $MaxTokens; system = $System; messages = @(@{ role = "user"; content = $Content }) } | ConvertTo-Json -Depth 10
         $C = [System.Net.Http.StringContent]::new($Body, [System.Text.Encoding]::UTF8, "application/json")
         $R = $H.PostAsync("https://api.anthropic.com/v1/messages", $C).Result
         $Txt = $R.Content.ReadAsStringAsync().Result
@@ -70,13 +72,13 @@ $script:AiBody = {
 }
 
 function Start-AiRequest {
-    param([string]$Name, [string]$System, [string]$UserText, [int]$MaxTokens = 2500, [scriptblock]$OnResult)
+    param([string]$Name, [string]$System, [string]$UserText, [int]$MaxTokens = 2500, [scriptblock]$OnResult, [string]$ImageB64 = "", [string]$ImageType = "image/jpeg")
     $Key = Get-AiKey
     if (-not $Key) { Show-Toast "Нет ключа Claude API — задай в настройках ИИ" "warn"; Show-AiKeyDialog; $Key = Get-AiKey; if (-not $Key) { return $false } }
     $Model = if ($script:Settings.AiModel) { $script:Settings.AiModel } else { $script:AiModel }
     if (-not $script:AiCallbacks) { $script:AiCallbacks = @{} }
     $script:AiCallbacks[$Name] = $OnResult
-    [void](Start-Worker -Name $Name -Replace -Body $script:AiBody -ArgList @($Key, $Model, $System, $UserText, $MaxTokens) -State @{ Name = $Name } -OnMessage {
+    [void](Start-Worker -Name $Name -Replace -Body $script:AiBody -ArgList @($Key, $Model, $System, $UserText, $MaxTokens, $ImageB64, $ImageType) -State @{ Name = $Name } -OnMessage {
         param($M)
         if ($M.Type -ne "ai") { return }
         & $script:AiCallbacks[$State.Name] $M

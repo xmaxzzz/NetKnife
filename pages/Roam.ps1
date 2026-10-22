@@ -143,6 +143,9 @@ function Invoke-RoamSample {
 
     # loss right after a roam belongs to the roam event, not to the AP's uplink statistics
     $InRoam = ($R.Pending -or ($Prev -and $Prev.Conn -and $Conn -and $Prev.Bssid -ne $M.Bssid))
+    # same for probes during a background Wi-Fi scan of the walk (the adapter briefly leaves the channel)
+    $InScan = Test-WalkScanning $M.Time
+    if ($InScan) { $InRoam = $true }
     if ($Conn) {
         $St = Get-RoamStat $M.Bssid
         $St.Ssid = $M.Ssid; $St.Ch = $M.Ch
@@ -206,7 +209,7 @@ function Invoke-RoamSample {
     }
 
     # outages without a roam in progress
-    if ($Conn -and -not $R.Pending) {
+    if ($Conn -and -not $R.Pending -and -not $InScan) {
         $Kind = $(if (-not $M.Ip) { "dhcp" } elseif (-not $GwOk) { "gw" } elseif (-not $NetOk) { "net" } elseif (-not $DnsOk) { "dns" } else { "" })
         if ($Kind) {
             if (-not $R.Out -or $R.Out.Kind -ne $Kind) { if ($R.Out) { Close-RoamOutage $M.Time }; $R.Out = @{ Kind = $Kind; Start = $M.Time; Bssid = $M.Bssid; Rssi = $M.Rssi; N = 0 } }
@@ -352,13 +355,14 @@ function Start-RoamMonitor {
             "rs" {
                 Invoke-RoamSample $M
                 Update-RoamNow $M
+                if ($script:Walk -and $script:Walk.Running) { Add-WalkConn $M }
                 # router feed follows the laptop's address (a roam into another subnet restarts it)
                 $Mt = $script:Roam.Mt
                 if ($Mt -and $M.Ip -and $M.Ip -ne $Mt.Ip) {
                     $First = -not $Mt.Ip
                     $Mt.Ip = $M.Ip
                     Start-MtFeed $Mt.Router $M.Ip { param($X) Invoke-RoamMt $X }
-                    if ($First) { [void](Add-RoamEvent ([DateTime]::Now) "info" "MikroTik $($Mt.Router.Name): подключаюсь" "ARP/DHCP ноутбука $($M.Ip), пинг до точек, журнал, порты · вход: $(if ($Mt.Router.Ready) { 'netknife (только чтение)' } else { $Mt.Router.Admin })") }
+                    if ($First) { [void](Add-RoamEvent ([DateTime]::Now) "info" "MikroTik $($Mt.Router.Name): подключаюсь" "ARP/DHCP ноутбука $($M.Ip), пинг до точек, журнал, порты · вход: $(if ($Mt.Router.Ready) { 'butler-service (только чтение)' } else { $Mt.Router.Admin })") }
                 }
                 if ($script:Roam.Count % 4 -eq 0) { Update-RoamAps }
             }

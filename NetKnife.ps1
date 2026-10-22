@@ -37,6 +37,10 @@ function Write-AppLog {
 . (Join-Path $PSScriptRoot "lib\Ai.ps1")
 . (Join-Path $PSScriptRoot "pages\WifiPlan.ps1")
 . (Join-Path $PSScriptRoot "pages\Roam.ps1")
+. (Join-Path $PSScriptRoot "lib\Mic.ps1")
+. (Join-Path $PSScriptRoot "lib\Whisper.ps1")
+. (Join-Path $PSScriptRoot "pages\Floor.ps1")
+. (Join-Path $PSScriptRoot "pages\Walk.ps1")
 . (Join-Path $PSScriptRoot "pages\WifiHub.ps1")
 . (Join-Path $PSScriptRoot "pages\Monitor.ps1")
 . (Join-Path $PSScriptRoot "pages\Wifi.ps1")
@@ -340,6 +344,7 @@ $Win.Add_Closing({
     Stop-AllTunnels
     Stop-Vpn -Quiet
     Stop-Worker "conns"
+    try { if ($script:Walk -and $script:Walk.Running -and $script:Walk.Mic) { $script:Walk.Mic.Stop() } } catch { }
     try { Stop-RoamMonitor -Quiet } catch { }
     try { Stop-MtFeed } catch { }
     Stop-TermSession

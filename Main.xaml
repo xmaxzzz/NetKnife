@@ -1099,6 +1099,83 @@
                                     <TextBox x:Name="WhSumText" Style="{StaticResource Code}" FontSize="12" TextWrapping="NoWrap" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"/>
                                 </DockPanel>
                             </Border>
+                            <!-- step 2: floor plan (picture, rooms, AP positions) -->
+                            <Grid x:Name="PageFloor" Visibility="Collapsed">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="290"/></Grid.ColumnDefinitions>
+                                <Border Style="{StaticResource CardBox}" Padding="10" Margin="0">
+                                    <DockPanel>
+                                        <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                                            <Button x:Name="FlLoad" Style="{StaticResource AccentBtn}" Padding="12,7" Margin="0,0,8,6"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8E5;" Style="{StaticResource Glyph}"/><TextBlock Text="Загрузить план (PNG, JPG, PDF)"/></StackPanel></Button>
+                                            <Button x:Name="FlPaste" Style="{StaticResource Btn}" Padding="12,7" Margin="0,0,8,6" ToolTip="Скриншот плана (Win+Shift+S) или скопированный файл; Ctrl+V"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE77F;" Style="{StaticResource Glyph}"/><TextBlock Text="Вставить из буфера"/></StackPanel></Button>
+                                            <Button x:Name="FlRooms" Style="{StaticResource Btn}" Padding="12,7" Margin="0,0,14,6" ToolTip="Claude прочитает подписи помещений на плане и обведёт их"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE99A;" Style="{StaticResource Glyph}"/><TextBlock Text="Распознать помещения (ИИ)"/></StackPanel></Button>
+                                            <CheckBox x:Name="FlRoomMode" Style="{StaticResource Switch}" Content="Рисовать помещения" VerticalAlignment="Center" Margin="0,0,0,6"/>
+                                        </WrapPanel>
+                                        <TextBlock x:Name="FlHint" DockPanel.Dock="Bottom" Foreground="{StaticResource Sub}" FontSize="12" TextWrapping="Wrap" Margin="2,8,0,0"/>
+                                        <Grid x:Name="FlHost" ClipToBounds="True"/>
+                                    </DockPanel>
+                                </Border>
+                                <Border Grid.Column="2" Style="{StaticResource CardBox}" Padding="12,10" Margin="0">
+                                    <Grid>
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="3*"/><RowDefinition Height="Auto"/><RowDefinition Height="2*"/></Grid.RowDefinitions>
+                                        <DockPanel>
+                                            <TextBlock x:Name="FlCount" DockPanel.Dock="Right" Foreground="{StaticResource Faint}" FontSize="11.5" VerticalAlignment="Center"/>
+                                            <TextBlock Text="ТОЧКИ ДОСТУПА" Style="{StaticResource Caption}" Margin="0"/>
+                                        </DockPanel>
+                                        <ListBox x:Name="FlAps" Grid.Row="1" Margin="0,6,0,0" Background="Transparent" BorderThickness="1" BorderBrush="{StaticResource Line}" Foreground="{StaticResource Text}" FontSize="12.5" ToolTip="Выбери точку и кликни на плане, где она висит; Delete — убрать с плана"/>
+                                        <TextBlock Grid.Row="2" Text="ПОМЕЩЕНИЯ  (2×клик — имя, Delete — удалить)" Style="{StaticResource Caption}" Margin="0,12,0,0"/>
+                                        <ListBox x:Name="FlRoomList" Grid.Row="3" Margin="0,6,0,0" Background="Transparent" BorderThickness="1" BorderBrush="{StaticResource Line}" Foreground="{StaticResource Text}" FontSize="12.5"/>
+                                    </Grid>
+                                </Border>
+                            </Grid>
+                            <!-- steps 3 / 5: voice-annotated walk -->
+                            <Grid x:Name="PageWalk" Visibility="Collapsed">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="440"/></Grid.ColumnDefinitions>
+                                <Border Style="{StaticResource CardBox}" Padding="10" Margin="0">
+                                    <DockPanel>
+                                        <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                                            <Button x:Name="WkStart" Style="{StaticResource AccentBtn}" Padding="18,9" Margin="0,0,8,6"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE720;" Style="{StaticResource Glyph}"/><TextBlock Text="Старт" FontWeight="SemiBold"/></StackPanel></Button>
+                                            <Button x:Name="WkStop" Style="{StaticResource Btn}" Padding="16,9" Margin="0,0,8,6" IsEnabled="False"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE71A;" Style="{StaticResource Glyph}"/><TextBlock Text="Стоп и разбор"/></StackPanel></Button>
+                                            <Button x:Name="WkMark" Style="{StaticResource Btn}" Padding="14,9" Margin="0,0,16,6" IsEnabled="False" ToolTip="Отметить «тут плохо» без слов"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE7C1;" Style="{StaticResource Glyph}"/><TextBlock Text="Отметка"/></StackPanel></Button>
+                                            <Button x:Name="WkManual" Style="{StaticResource GhostBtn}" Padding="10,9" Margin="0,0,4,6" ToolTip="Старый способ: стоишь, вводишь название и «Замер здесь»"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8FD;" Style="{StaticResource Glyph}"/><TextBlock Text="Ручные замеры"/></StackPanel></Button>
+                                            <Button x:Name="WkRoamDetail" Style="{StaticResource GhostBtn}" Padding="10,9" Margin="0,0,4,6"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9D9;" Style="{StaticResource Glyph}"/><TextBlock Text="Монитор подробно"/></StackPanel></Button>
+                                        </WrapPanel>
+                                        <TextBlock DockPanel.Dock="Bottom" Foreground="{StaticResource Faint}" FontSize="11.5" TextWrapping="Wrap" Margin="2,8,0,0" Text="Точки сигнала: зелёный ≥ −60 · салатовый ≥ −67 · жёлтый ≥ −72 · оранжевый ≥ −78 · красный хуже (dBm ноутбука). Кольца: синее — переход без паузы, оранжевое — с паузой, красное — обрыв, фиолетовое — заметка голосом."/>
+                                        <Grid x:Name="WkHost" ClipToBounds="True"/>
+                                    </DockPanel>
+                                </Border>
+                                <Border Grid.Column="2" Style="{StaticResource CardBox}" Padding="14,12" Margin="0">
+                                    <DockPanel>
+                                        <StackPanel DockPanel.Dock="Top">
+                                            <DockPanel>
+                                                <TextBlock x:Name="WkTime" DockPanel.Dock="Left" Text="00:00" FontFamily="{StaticResource MonoFont}" FontSize="26" FontWeight="SemiBold" Margin="0,0,14,0"/>
+                                                <StackPanel VerticalAlignment="Center">
+                                                    <TextBlock Text="МИКРОФОН" Style="{StaticResource Caption}" Margin="0,0,0,4"/>
+                                                    <Border x:Name="WkLevelBox" Height="8" CornerRadius="4" Background="{StaticResource Line}">
+                                                        <Border x:Name="WkLevel" HorizontalAlignment="Left" Width="2" CornerRadius="4" Background="{StaticResource Sub}"/>
+                                                    </Border>
+                                                </StackPanel>
+                                            </DockPanel>
+                                            <TextBlock x:Name="WkNow" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,10,0,0"/>
+                                            <TextBlock x:Name="WkStats" Foreground="{StaticResource Sub}" FontSize="11.5" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                                            <DockPanel Margin="0,10,0,0">
+                                                <Button x:Name="WkInstall" DockPanel.Dock="Right" Style="{StaticResource Btn}" Padding="10,4" Margin="8,0,0,0" Visibility="Collapsed" Content="Установить"/>
+                                                <TextBlock x:Name="WkWhisper" Foreground="{StaticResource Sub}" FontSize="11.5" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                                            </DockPanel>
+                                            <WrapPanel Margin="0,10,0,0">
+                                                <Button x:Name="WkAi" Style="{StaticResource AccentBtn}" Padding="12,6" Margin="0,0,6,6" IsEnabled="False"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE99A;" Style="{StaticResource Glyph}"/><TextBlock Text="Разбор ИИ"/></StackPanel></Button>
+                                                <Button x:Name="WkRetx" Style="{StaticResource Btn}" Padding="10,6" Margin="0,0,6,6" IsEnabled="False" ToolTip="Расшифровать запись заново"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE720;" Style="{StaticResource Glyph}" FontSize="12"/><TextBlock Text="Расшифровать"/></StackPanel></Button>
+                                                <Button x:Name="WkRebuild" Style="{StaticResource Btn}" Padding="10,6" Margin="0,0,6,6" ToolTip="Заново сопоставить речь и клики с помещениями (после правки названий на плане)"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" Style="{StaticResource Glyph}" FontSize="12"/><TextBlock Text="Пересобрать"/></StackPanel></Button>
+                                                <Button x:Name="WkCopy" Style="{StaticResource GhostBtn}" Padding="8,6" Margin="0,0,0,6" ToolTip="Копировать отчёт"><TextBlock Text="&#xE8C8;" Style="{StaticResource Glyph}" Margin="0"/></Button>
+                                            </WrapPanel>
+                                        </StackPanel>
+                                        <Grid>
+                                            <Grid.RowDefinitions><RowDefinition Height="2*"/><RowDefinition Height="8"/><RowDefinition Height="3*"/></Grid.RowDefinitions>
+                                            <ListView x:Name="WkEvents" Style="{StaticResource List}" ItemTemplate="{StaticResource RoamEvRowT}" BorderThickness="1" BorderBrush="{StaticResource Line}"/>
+                                            <TextBox x:Name="WkResult" Grid.Row="2" Style="{StaticResource Code}" FontSize="11.5" IsReadOnly="True" TextWrapping="NoWrap" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"/>
+                                        </Grid>
+                                    </DockPanel>
+                                </Border>
+                            </Grid>
                         </Grid>
                     </DockPanel>
 

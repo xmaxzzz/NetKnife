@@ -1,26 +1,29 @@
 # Page: Wi-Fi wizard — one tab for everything wireless. The existing Wi-Fi scanner, planner and roaming monitor
 # panels are moved into the wizard host at start-up; the wizard decides which one is visible and what to do on
-# each step: prepare (site, router, AP list + current power) → roaming test "before" → survey → calculation and
-# entering values into Omada → survey "after" → roaming test "after" → summary (was/became). Wizard progress
-# lives in the site plan (plan.Wizard), so a site can be resumed later.
+# each step: prepare (site, router, AP list + current power) → floor plan (picture, rooms, where the APs hang) →
+# voice-annotated walk "before" (pages\Walk.ps1: roaming test + survey in one go) → calculation and entering values
+# into Omada → walk "after" → summary (was/became). Wizard progress lives in the site plan (plan.Wizard), so a site
+# can be resumed later.
 
 $script:WhStep = 1
 $script:WhPhase = ""      # "before" / "after" while a roaming step is open — Stop-RoamMonitor stores its result there
 $script:WhSteps = @(
-    @{ N = 1; Key = "prep";    Title = "Подготовка";      Panel = "WhPrep" }
-    @{ N = 2; Key = "roam1";   Title = "Тест до";         Panel = "PageRoam" }
-    @{ N = 3; Key = "survey";  Title = "Замеры";          Panel = "PageWplan" }
-    @{ N = 4; Key = "calc";    Title = "Расчёт → Omada";  Panel = "PageWplan" }
-    @{ N = 5; Key = "survey2"; Title = "Замеры после";    Panel = "PageWplan" }
-    @{ N = 6; Key = "roam2";   Title = "Тест после";      Panel = "PageRoam" }
-    @{ N = 7; Key = "sum";     Title = "Итог";            Panel = "WhSummary" }
+    @{ N = 1; Key = "prep";  Title = "Подготовка";      Panel = "WhPrep" }
+    @{ N = 2; Key = "plan";  Title = "План";            Panel = "PageFloor" }
+    @{ N = 3; Key = "walk1"; Title = "Прогулка до";     Panel = "PageWalk" }
+    @{ N = 4; Key = "calc";  Title = "Расчёт → Omada";  Panel = "PageWplan" }
+    @{ N = 5; Key = "walk2"; Title = "Прогулка после";  Panel = "PageWalk" }
+    @{ N = 6; Key = "sum";   Title = "Итог";            Panel = "WhSummary" }
 )
-$script:WhPanels = @("WhPrep", "WhSummary", "PageWifi", "PageWplan", "PageRoam")
+$script:WhPanels = @("WhPrep", "WhSummary", "PageWifi", "PageWplan", "PageRoam", "PageFloor", "PageWalk")
 
 function Get-WhState {
     if (-not $script:Wplan) { return @{} }
-    if (-not $script:Wplan.Wizard) { $script:Wplan.Wizard = @{ Step = 1; Applied = $false; AfterSeries = ""; RoamBefore = $null; RoamAfter = $null; RouterId = "" } }
-    return $script:Wplan.Wizard
+    if (-not $script:Wplan.Wizard) { $script:Wplan.Wizard = @{ V = 2; Step = 1; Applied = $false; AfterSeries = ""; RoamBefore = $null; RoamAfter = $null; RouterId = ""; WalkBefore = ""; WalkAfter = ""; Walks = @() } }
+    $W = $script:Wplan.Wizard
+    # wizard v1 had 7 steps (test → survey → calc → survey → test → summary): map onto the walk steps
+    if (-not $W.V) { $W.Step = @{ 1 = 1; 2 = 3; 3 = 3; 4 = 4; 5 = 5; 6 = 5; 7 = 6 }[[int]$W.Step]; if (-not $W.Step) { $W.Step = 1 }; $W.V = 2 }
+    return $W
 }
 
 function Test-WhStepDone {
@@ -30,11 +33,10 @@ function Test-WhStepDone {
     $Base = @($script:Wplan.Points | Where-Object { $_.Series -eq $script:WplanBaseSeries }).Count
     switch ($N) {
         1 { return [bool]($W.RouterId -and @(Get-MtCachedAps $W.RouterId).Count -and @($script:Wplan.Ssids).Count) }
-        2 { return [bool]$W.RoamBefore }
-        3 { return ($Base -ge 2) }
+        2 { $F = $script:Wplan.Floor; return [bool]($F -and $F.Image -and $F.Aps -and $F.Aps.Count) }
+        3 { return [bool]($W.WalkBefore -or $W.RoamBefore -or $Base -ge 2) }
         4 { return [bool]$W.Applied }
-        5 { return [bool]($W.AfterSeries -and @($script:Wplan.Points | Where-Object { $_.Series -eq $W.AfterSeries }).Count) }
-        6 { return [bool]$W.RoamAfter }
+        5 { return [bool]($W.WalkAfter -or $W.RoamAfter -or ($W.AfterSeries -and @($script:Wplan.Points | Where-Object { $_.Series -eq $W.AfterSeries }).Count)) }
     }
     return $false
 }
@@ -72,9 +74,9 @@ function Show-WhPanel {
 function Set-WhStep {
     param([int]$N)
     if ($N -lt 1) { $N = 1 }; if ($N -gt $script:WhSteps.Count) { $N = $script:WhSteps.Count }
-    if ($script:Roam -and $script:Roam.Running -and $script:WhStep -ne $N -and $script:WhSteps[$script:WhStep - 1].Panel -eq "PageRoam") {
-        if (-not (Show-Confirm "Остановить монитор?" "Идёт запись роуминга. Остановить и сохранить результат шага?" "Остановить")) { return }
-        Stop-RoamMonitor
+    if ($script:Walk -and $script:Walk.Running -and $script:WhStep -ne $N) {
+        if (-not (Show-Confirm "Остановить прогулку?" "Идёт запись прогулки. Остановить, расшифровать и сохранить результат шага?" "Остановить")) { return }
+        Stop-Walk
     }
     $script:WhStep = $N
     $S = $script:WhSteps[$N - 1]
@@ -90,15 +92,20 @@ function Set-WhStep {
             $Ui.WhText.Text = $(if (-not @(Get-MtRouters).Count) { "Роутер MikroTik ещё не добавлен — подключи его (блок ниже), потом выбери объект. " } else { "" }) + "Выбери объект и роутер (кнопка «Найти в сети» ищет MikroTik, как Winbox). Список точек и их имена подтянутся из DHCP роутера. Двойной клик по точке — впиши её текущую мощность из Omada (Devices → точка → Config → Radios): тогда расчёт даст точные dBm."
             Update-WhPrep
         }
-        { $_ -in @("roam1", "roam2") } {
-            $script:WhPhase = $(if ($S.Key -eq "roam1") { "before" } else { "after" })
-            $Ui.WhText.Text = $(if ($S.Key -eq "roam1") { "Исходная картина. «Старт» и пройди объект обычным шагом через зоны всех точек; задержись там, где обычно пропадает связь. В конце — «Стоп и диагноз»: результат сохранится как «до»." } else { "Повтори ту же прогулку после правок в Omada: «Старт» → маршрут → «Стоп и диагноз». Результат сохранится как «после» и пойдёт в итог." })
-            if ($W.RouterId -and $Ui.RoamRouter) { $Ui.RoamRouter.SelectedValue = $W.RouterId }
+        "plan" {
+            $Ui.WhText.Text = "Загрузи план помещений (PNG, JPG, PDF или скриншот из буфера). «Распознать помещения» — ИИ прочитает подписи и обведёт комнаты; поправь названия: именно их ты будешь называть вслух на прогулке. Затем выбери справа каждую точку доступа и кликни на плане, где она висит."
+            Update-FloorPage
         }
-        "survey" {
-            Set-WhPlanLayout "survey"
-            $Ui.WpSeries.Text = $script:WplanBaseSeries
-            $Ui.WhText.Text = "Замеры: в каждой комнате встань там, где обычно пользуются Wi-Fi, введи название и Enter. В дверях и коридорах между зонами точек — с галкой «Переход». Минимум по 2 места на точку, включая дальние углы."
+        { $_ -in @("walk1", "walk2") } {
+            $Ph = $(if ($S.Key -eq "walk1") { "before" } else { "after" })
+            $script:WhPhase = $Ph
+            if ($Ph -eq "after" -and -not $W.AfterSeries) {
+                $L = @(Get-WplanSeriesList); $K = 1; while ($L -contains "После правок $K") { $K++ }
+                $W.AfterSeries = "После правок $K"; Save-Wplan
+            }
+            if ($W.RouterId -and $Ui.RoamRouter) { $Ui.RoamRouter.SelectedValue = $W.RouterId }
+            $Ui.WhText.Text = $(if ($Ph -eq "before") { "Исходная картина. «Старт» и иди по объекту обычным шагом. Входя в помещение, назови его вслух, как на плане («кухня», «коридор спальни»); если что-то не так — скажи («тут пропало») или нажми «Отметка». Можно кликать на плане, где стоишь — карта станет точнее. В каждом помещении задержись на 15–20 с. «Стоп» — расшифровка голоса, карта, замеры для расчёта." } else { "Проверка после правок в Omada: пройди тот же маршрут, называя те же помещения. Результат сохранится как «после» (серия «$($W.AfterSeries)») и пойдёт в итог." })
+            Show-WalkStep $Ph
         }
         "calc" {
             Set-WhPlanLayout "calc"
@@ -109,15 +116,6 @@ function Set-WhStep {
             $Ui.WhApplied.IsChecked = [bool]$W.Applied
             $Ui.WhText.Text = "Ниже — прогноз и значения для каждой точки (после правки поправки или потолков — «Рассчитать»). «Лист для Omada» копирует таблицу (точка → канал → ширина → мощность). Внеси значения в Omada, затем отметь «Внёс в Omada» и нажми «Принять как текущие» — следующий расчёт будет от новых мощностей."
         }
-        "survey2" {
-            Set-WhPlanLayout "survey"
-            if (-not $W.AfterSeries) {
-                $L = @(Get-WplanSeriesList); $K = 1; while ($L -contains "После правок $K") { $K++ }
-                $W.AfterSeries = "После правок $K"; Save-Wplan
-            }
-            $Ui.WpSeries.Text = $W.AfterSeries
-            $Ui.WhText.Text = "Проверочный обход: те же места под ТЕМИ ЖЕ названиями, что в «Замерах» (серия «$($W.AfterSeries)»). Так итог сравнит было/стало по каждой комнате и переходу."
-        }
         "sum" {
             $Ui.WhText.Text = "Сравнение до/после: сигнал по местам и роуминг по точкам. HTML-отчёт — для заказчика или монтажника; «Совет ИИ» разберёт, что осталось."
             Update-WhSummary
@@ -126,6 +124,15 @@ function Set-WhStep {
     Show-WhPanel $S.Panel
     Update-WhStepper
     Update-PageSub
+}
+
+# fallback inside a walk step: the old stand-and-measure survey for the same series
+function Show-WhManualSurvey {
+    Set-WhPlanLayout "survey"
+    $W = Get-WhState
+    $Ui.WpSeries.Text = $(if ($script:WhPhase -eq "after" -and $W.AfterSeries) { $W.AfterSeries } else { $script:WplanBaseSeries })
+    Show-WhPanel "PageWplan"
+    $Ui.WhText.Text = "Ручные замеры (серия «$($Ui.WpSeries.Text)»): встань в помещении, введи название и Enter — 3 прохода скана. Вернуться к прогулке — кнопка шага сверху."
 }
 
 # The planner panel is shared by the survey and calc steps; each step shows only its part (site, SSID and series
@@ -172,9 +179,9 @@ function Show-WhAir {
 }
 
 function Get-WhSub {
-    if (-not $script:Wplan) { return "Мастер: подготовка → тест → замеры → расчёт → проверка" }
-    $Done = @(1..6 | Where-Object { Test-WhStepDone $_ }).Count
-    return "$($script:Wplan.Site) · шагов выполнено: $Done из 6"
+    if (-not $script:Wplan) { return "Мастер: подготовка → план → прогулка → расчёт → проверка" }
+    $Done = @(1..5 | Where-Object { Test-WhStepDone $_ }).Count
+    return "$($script:Wplan.Site) · шагов выполнено: $Done из 5"
 }
 
 # ---------------------------------------------------------------- step 1: preparation
@@ -282,7 +289,7 @@ function Update-WhSummary {
     $Out = [System.Text.StringBuilder]::new()
     [void]$Out.AppendLine("ИТОГ · $($script:Wplan.Site)")
     [void]$Out.AppendLine("")
-    foreach ($N in 1..6) { [void]$Out.AppendLine(("  {0} {1}. {2}" -f $(if (Test-WhStepDone $N) { "✔" } else { "·" }), $N, $script:WhSteps[$N - 1].Title)) }
+    foreach ($N in 1..5) { [void]$Out.AppendLine(("  {0} {1}. {2}" -f $(if (Test-WhStepDone $N) { "✔" } else { "·" }), $N, $script:WhSteps[$N - 1].Title)) }
     [void]$Out.AppendLine("")
     [void]$Out.AppendLine("━━━ РОУМИНГ ━━━")
     $B = $W.RoamBefore; $A = $W.RoamAfter
@@ -296,8 +303,8 @@ function Update-WhSummary {
             $Mk = { param($Z) if (-not $Z) { "—" } else { switch ($Z.Kind) { "fail" { "✖" } "warn" { "▲" } default { "✔" } } } }
             [void]$Out.AppendLine(("  {0,-22} {1} → {2}   {3}" -f $Nm, (& $Mk $X), (& $Mk $Y), $(if ($Y) { $Y.Msg } else { "в тесте «после» не встречалась" })))
         }
-    } elseif ($B) { [void]$Out.AppendLine("есть только тест «до» ($($B.Time)): переходов $($B.Roams), с потерей связи $($B.Bad). Пройди шаг 6.") }
-    else { [void]$Out.AppendLine("тестов роуминга нет — шаги 2 и 6.") }
+    } elseif ($B) { [void]$Out.AppendLine("есть только тест «до» ($($B.Time)): переходов $($B.Roams), с потерей связи $($B.Bad). Пройди шаг 5.") }
+    else { [void]$Out.AppendLine("тестов роуминга нет — шаги 3 и 5.") }
     [void]$Out.AppendLine("")
     [void]$Out.AppendLine("━━━ СИГНАЛ ПО МЕСТАМ ━━━")
     if ($W.AfterSeries) {
@@ -306,6 +313,16 @@ function Update-WhSummary {
         [void]$Out.AppendLine((Format-WplanCompare))
         $script:Wplan.CurSeries = $Keep
     } else { [void]$Out.AppendLine("проверочного обхода нет — шаг 5.") }
+    # voice notes of both walks
+    foreach ($Ph in @("before", "after")) {
+        $Id = $(if ($Ph -eq "before") { $W.WalkBefore } else { $W.WalkAfter })
+        $K = $(if ($Id) { Read-WalkFile $Id } else { $null })
+        if ($K -and @($K.Notes).Count) {
+            [void]$Out.AppendLine("")
+            [void]$Out.AppendLine("━━━ ЗАМЕТКИ ПРОГУЛКИ «$(if ($Ph -eq 'before') { 'до' } else { 'после' })» ━━━")
+            foreach ($N2 in @($K.Notes)) { [void]$Out.AppendLine(("  {0}  {1,-18} «{2}»" -f (Format-WalkTime $N2.T), $N2.Room, $N2.Text)) }
+        }
+    }
     $Ui.WhSumText.Text = $Out.ToString()
 }
 
@@ -379,6 +396,8 @@ function Initialize-WifiHub {
     $Ui.WhSumHtml.Add_Click({ Use-WplanSite; Export-WplanHtml })
     $Ui.WhSumCopy.Add_Click({ Copy-Text $Ui.WhSumText.Text "итог" })
     $Ui.WhSumAi.Add_Click({ Start-WhAi })
+    Initialize-FloorPage
+    Initialize-WalkPage
     $script:WhInit = $true
     if ($script:Wplan) { $script:WhStep = [int]$(if ((Get-WhState).Step) { (Get-WhState).Step } else { 1 }) }
 }
