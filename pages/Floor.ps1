@@ -11,6 +11,12 @@ function Get-Floor {
     $F = $script:Wplan.Floor
     if (-not $F.Rooms) { $F.Rooms = @() }
     if (-not $F.Aps) { $F.Aps = @{} }
+    # v2026.10.15.22 stored every click as 0 or 1 ([Math]::Min(1, x) picked the Int32 overload): such AP
+    # positions are dropped once, so the APs show as not placed and get placed again
+    if (-not $F.V) {
+        foreach ($K in @($F.Aps.Keys)) { $A = $F.Aps[$K]; if (([double]$A.X -eq 0 -or [double]$A.X -eq 1) -and ([double]$A.Y -eq 0 -or [double]$A.Y -eq 1)) { [void]$F.Aps.Remove($K) } }
+        $F.V = 2
+    }
     return $F
 }
 
@@ -58,7 +64,7 @@ function Save-FloorBitmap {
     }
     Save-Wplan
     Update-FloorPage
-    Show-Toast "План загружен: $($F.W)×$($F.H)"
+    Show-Toast $(if ($Keep -and (@($F.Rooms).Count -or $F.Aps.Count)) { "План заменён: $($F.W)×$($F.H), помещения и точки остались на местах" } else { "План загружен: $($F.W)×$($F.H)" })
 }
 
 function Read-FloorBitmapFile {
@@ -66,6 +72,22 @@ function Read-FloorBitmapFile {
     $B = New-Object System.Windows.Media.Imaging.BitmapImage
     $B.BeginInit(); $B.CacheOption = "OnLoad"; $B.UriSource = [Uri]$Path; $B.EndInit(); $B.Freeze()
     return $B
+}
+
+function Remove-Floor {
+    $F = Get-Floor
+    if (-not $F -or -not $F.Image) { return }
+    $Msg = "Удалится картинка плана$(if (@($F.Rooms).Count) { ", помещения ($(@($F.Rooms).Count))" })$(if ($F.Aps.Count) { " и расстановка точек ($($F.Aps.Count))" }). Прогулки, замеры и расчёт останутся. Новый план — кнопкой «Загрузить план»."
+    if (-not (Show-Confirm "Удалить план?" $Msg "Удалить" -Danger)) { return }
+    $P = Get-FloorImagePath
+    $script:Wplan.Floor = @{ Image = ""; W = 0; H = 0; Rooms = @(); Aps = @{} }
+    $script:FloorSelAp = ""
+    Save-Wplan
+    if ($P) { try { Remove-Item $P -Force } catch { Write-AppLog "floor delete: $_" } }
+    if ($script:FloorView) { $script:FloorView.Bmp = $null; $script:FloorView.File = "" }
+    if ($script:WalkView) { $script:WalkView.Bmp = $null; $script:WalkView.File = "" }
+    Update-FloorPage
+    Show-Toast "План удалён"
 }
 
 function Import-FloorFile {
@@ -326,6 +348,9 @@ function Update-FloorPage {
     $Ui.FlRoomList.ItemsSource = @(if ($F) { @($F.Rooms) | ForEach-Object { [pscustomobject]@{ Name = $_.Name } } })
     $Ui.FlRoomList.DisplayMemberPath = "Name"
     $script:FloorListSync = $false
+    $Has = [bool](Get-FloorImagePath)
+    $Ui.FlLoadText.Text = $(if ($Has) { "Заменить план" } else { "Загрузить план (PNG, JPG, PDF)" })
+    $Ui.FlDelete.Visibility = $(if ($Has) { "Visible" } else { "Collapsed" })
     $NPl = $(if ($F) { $F.Aps.Count } else { 0 })
     $Ui.FlCount.Text = "на плане $NPl из $($Items.Count)"
     if (-not (Get-FloorImagePath)) { $Ui.FlHint.Text = "Загрузи план: картинка или PDF (кнопка) или скриншот (Win+Shift+S → «Вставить», Ctrl+V)." }
@@ -341,7 +366,7 @@ function Get-FloorPos {
     $V = $script:FloorView
     if (-not $V.W) { return $null }
     $Pt = $E.GetPosition($V.Canvas)
-    return @{ X = [Math]::Max(0, [Math]::Min(1, $Pt.X / $V.W)); Y = [Math]::Max(0, [Math]::Min(1, $Pt.Y / $V.H)) }
+    return @{ X = [Math]::Max(0.0, [Math]::Min(1.0, $Pt.X / $V.W)); Y = [Math]::Max(0.0, [Math]::Min(1.0, $Pt.Y / $V.H)) }
 }
 
 function Initialize-FloorPage {
@@ -351,6 +376,7 @@ function Initialize-FloorPage {
     $Ui.FlLoad.Add_Click({ Import-FloorFile })
     $Ui.FlPaste.Add_Click({ Import-FloorClipboard })
     $Ui.FlRooms.Add_Click({ Start-FloorRoomsAi })
+    $Ui.FlDelete.Add_Click({ Remove-Floor })
     $Ui.FlRoomMode.Add_Click({ $script:FloorSelAp = ""; Update-FloorPage })
     $Ui.FlAps.Add_SelectionChanged({
         if ($script:FloorListSync) { return }

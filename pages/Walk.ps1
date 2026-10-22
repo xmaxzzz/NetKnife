@@ -506,7 +506,7 @@ function Update-WalkLive {
     $S = ([DateTime]::Now - $K.Started).TotalSeconds
     $Ui.WkTime.Text = Format-WalkTime $S
     $Lv = $(if ($K.Mic) { [Math]::Min(1.0, $K.Mic.Peak / 12000.0) } else { 0 })
-    $Ui.WkLevel.Width = [Math]::Max(2, $Lv * $Ui.WkLevelBox.ActualWidth)
+    $Ui.WkLevel.Width = [Math]::Max(2.0, $Lv * $Ui.WkLevelBox.ActualWidth)
     $Ui.WkLevel.Background = Get-Brush $(if (-not $K.Mic) { "Faint" } elseif ($Lv -gt 0.05) { "Ok" } else { "Sub" })
     $L = $(if ($script:Roam) { $script:Roam.Last } else { $null })
     $Room = $(if ($K.Clicks.Count) { $Rm = Get-FloorRoomAt $K.Clicks[$K.Clicks.Count - 1].X $K.Clicks[$K.Clicks.Count - 1].Y; if ($Rm) { $Rm.Name } else { "" } } else { "" })

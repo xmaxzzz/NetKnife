@@ -265,7 +265,7 @@ function Get-RoamApVerdict {
     $GwN = $St.GwOk + $St.GwFail
     $Loss = $(if ($GwN) { 100.0 * $St.GwFail / $GwN } else { 0 })
     $Avg = $(if ($St.GwOk) { $St.GwSum / $St.GwOk } else { 0 })
-    $Jit = $(if ($St.GwOk -gt 1) { [Math]::Sqrt([Math]::Max(0, $St.GwSq / $St.GwOk - $Avg * $Avg)) } else { 0 })
+    $Jit = $(if ($St.GwOk -gt 1) { [Math]::Sqrt([Math]::Max(0.0, $St.GwSq / $St.GwOk - $Avg * $Avg)) } else { 0 })
     $RoamAvg = $(if (@($St.RoamOut).Count) { (@($St.RoamOut) | Measure-Object -Average).Average } else { 0 })
     if ($St.NetChanges) { $Kind = "fail"; $Msgs += "после перехода на неё меняется сеть (адрес/шлюз/MAC шлюза) — VLAN на порту коммутатора этой точки или профиль SSID не тот" }
     if ($GwN -ge 20 -and $Loss -ge 3 -and $Rssi -ge -67) { $Kind = "fail"; $Msgs += ("потери до шлюза {0:N0}% при хорошем сигнале {1} dBm — uplink точки: кабель/разъём, скорость порта (10/100?), PoE, mesh-канал" -f $Loss, $Rssi) }
