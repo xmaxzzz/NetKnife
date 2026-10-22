@@ -16,7 +16,7 @@ $script:WalkScanBody = {
         $Q.Enqueue(@{ Type = "ws0" })
         $L = @()
         try { $L = [NetKnife.Wlan]::Scan(3200) } catch { $Q.Enqueue(@{ Type = "wserr"; Error = "$($_.Exception.Message)" }) }
-        $S = @(foreach ($B in $L) { @{ Bssid = $B.Bssid; Ssid = $B.Ssid; Ch = $B.Channel; Band = $B.Band; Rssi = $B.Rssi } })
+        $S = @(foreach ($B in $L) { @{ Bssid = $B.Bssid; Ssid = $B.Ssid; Ch = $B.Channel; Band = $B.Band; Rssi = $B.Rssi; W = $B.Width; K = $B.K; V = $B.V; R = $B.R; Sec = $B.Sec; Cc = $B.Country } })
         $Q.Enqueue(@{ Type = "ws"; Time = [DateTime]::Now; Samples = $S })
         $Left = $EveryMs
         while ($Left -gt 0 -and -not $Ctl.Stop) { Start-Sleep -Milliseconds 100; $Left -= 100 }

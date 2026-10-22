@@ -208,7 +208,8 @@ function Update-WhPrep {
         $A = $(if ($script:Wplan) { $script:Wplan.Aps[$K] } else { $null })
         $Nm = $(if ($A -and $A.Name) { $A.Name } elseif ($R.Name) { $R.Name } else { "AP " + $K })
         $Tx = $(if ($A -and ("$($A.Tx24)" -or "$($A.Tx5)")) { "2.4: $(if ("$($A.Tx24)") { $A.Tx24 } else { '?' }) · 5: $(if ("$($A.Tx5)") { $A.Tx5 } else { '?' }) dBm" } else { "мощность не указана" })
-        [pscustomobject]@{ Key = $K; Label = ("{0,-24} {1,-16} {2,-18} {3}" -f $Nm, $R.Ip, $R.Mac, $Tx) }
+        $Air = Format-WplanAir $A
+        [pscustomobject]@{ Key = $K; NoTx = (-not ($A -and ("$($A.Tx24)" -or "$($A.Tx5)"))); Label = ("{0,-24} {1,-16} {2,-18} {3,-34} {4}" -f $Nm, $R.Ip, $R.Mac, $Tx, $(if ($Air) { "эфир: $Air" } else { "" })) }
     }
     $Ui.WhAps.ItemsSource = @($List); $Ui.WhAps.DisplayMemberPath = "Label"
     # readiness
@@ -218,9 +219,18 @@ function Update-WhPrep {
     $Rt = $(if ($W.RouterId) { Get-MtRouter $W.RouterId } else { $null })
     $C += $(if ($Rt) { "✔ роутер: $($Rt.Name)$(if (-not $Rt.Ready) { ' (не подготовлен — работает через админа)' })" } else { "✖ роутер не выбран — без него не будет пинга точек и DHCP в тесте роуминга" })
     $NAp = @($List).Count
-    $NTx = @($List | Where-Object { $_.Label -notmatch 'не указана' }).Count
+    $NTx = @($List | Where-Object { -not $_.NoTx }).Count
+    $NAir = @($List | Where-Object { $_.Label -match 'эфир:' }).Count
     $C += $(if ($NAp) { "✔ точек: $NAp" } else { "✖ точки не найдены — «Обновить с роутера»" })
-    $C += $(if ($NAp -and $NTx -eq $NAp) { "✔ мощности указаны у всех" } elseif ($NAp) { "▲ мощность указана у $NTx из $NAp — без неё рекомендации относительные" } else { "" })
+    $C += $(if ($NAp -and $NTx -eq $NAp) { "✔ мощности указаны у всех" } elseif ($NAp) { "▲ мощность указана у $NTx из $NAp — «CSV для мощностей»: впиши их из Omada одной таблицей" } else { "" })
+    $C += $(if ($NAp -and $NAir -eq $NAp) { "✔ каналы и ширина из эфира — у всех" } elseif ($NAp) { "▲ из эфира прочитано $NAir из $NAp точек — дальние видны с прогулки или если подойти ближе и нажать «Считать из эфира»" } else { "" })
+    if ($script:Wplan.AirCountry -and $script:Wplan.AirCountry -ne "RU") { $C += "▲ страна сайта в эфире: $($script:Wplan.AirCountry) — объект в России? Site Settings → Country/Region (влияет на доступные каналы 5 ГГц)" }
+    $Fl = @(@($script:Wplan.Aps.Values) | Where-Object { $_.Air })
+    if ($Fl.Count) {
+        $Kv = "11k $(@($Fl | Where-Object { $_.Air.K }).Count)/$($Fl.Count) · 11v $(@($Fl | Where-Object { $_.Air.V }).Count)/$($Fl.Count) · 11r $(@($Fl | Where-Object { $_.Air.R }).Count)/$($Fl.Count)"
+        $Sc = (@($Fl | ForEach-Object { $_.Air.Sec } | Where-Object { $_ }) | Sort-Object -Unique) -join ", "
+        $C += "  роуминг в эфире: $Kv · безопасность: $Sc"
+    }
     $Ui.WhChecks.Text = ($C | Where-Object { $_ }) -join "`n"
     Update-WhStepper
 }
@@ -254,6 +264,134 @@ function Open-WhApDialog {
     }
     Show-WplanApDialog $S.Key
     Update-WhPrep
+}
+
+# ---------------------------------------------------------------- reading the air / CSV / verify
+
+$script:WhAirBody = {
+    param($Q, $Ctl, $Rounds)
+    $All = @()
+    for ($i = 1; $i -le $Rounds; $i++) {
+        if ($Ctl.Stop) { return }
+        try { $L = [NetKnife.Wlan]::Scan(3200) } catch { $Q.Enqueue(@{ Type = "airdone"; Error = "$($_.Exception.Message)" }); return }
+        $All += @(foreach ($B in $L) { @{ Bssid = $B.Bssid; Ssid = $B.Ssid; Ch = $B.Channel; Band = $B.Band; Rssi = $B.Rssi; W = $B.Width; K = $B.K; V = $B.V; R = $B.R; Sec = $B.Sec; Cc = $B.Country } })
+        $Q.Enqueue(@{ Type = "airround"; N = $i; Total = $Rounds })
+    }
+    $Q.Enqueue(@{ Type = "airdone"; Samples = $All })
+}
+
+# 3 scans of the air → channel/width/11kvr/security per AP; $Then gets the AP keys seen
+function Start-WhAirRead {
+    param([scriptblock]$Then, [string]$Label = "Читаю эфир")
+    if (-not $script:Wplan) { Show-Toast "Сначала выбери объект" "warn"; return }
+    if (Test-WorkerRunning "wh-air") { return }
+    $script:WhAirThen = $Then
+    Set-MtStatus "$Label (3 прохода, ~12 с)…" "wait"
+    [void](Start-Worker -Name "wh-air" -Replace -Body $script:WhAirBody -ArgList @(3) -OnMessage {
+        param($M)
+        if ($M.Type -eq "airround") { Set-MtStatus "Эфир: проход $($M.N) из $($M.Total)…" "wait"; return }
+        if ($M.Type -ne "airdone") { return }
+        if ($M.Error) { Set-MtStatus "Эфир не прочитан: $($M.Error)" "fail"; return }
+        Register-WplanAps @($M.Samples)
+        Save-Wplan
+        $Seen = @(@($M.Samples) | Where-Object { Test-WplanOurs $_ } | ForEach-Object { Get-WplanKey $_.Bssid } | Sort-Object -Unique)
+        Set-MtStatus "Эфир: видно своих точек $($Seen.Count) из $($script:Wplan.Aps.Count)$(if ($script:Wplan.AirCountry) { " · страна $($script:Wplan.AirCountry)" })" "ok"
+        if ($script:WhAirThen) { & $script:WhAirThen $Seen }
+    })
+}
+
+# AP rows for the CSV: router DHCP list ∪ planner list, with what the air says
+function Get-WhApRows {
+    $W = Get-WhState
+    $Rows = [ordered]@{}
+    foreach ($A in @(Get-MtCachedAps $W.RouterId)) { $Rows[$A.Key] = @{ Key = $A.Key; Mac = $A.Mac; Ip = $A.Ip; Name = $A.Name } }
+    foreach ($K in @($script:Wplan.Aps.Keys)) { if (-not $Rows.Contains($K)) { $Rows[$K] = @{ Key = $K; Mac = ""; Ip = ""; Name = "" } } }
+    foreach ($R in $Rows.Values) { $R.Name = Get-WplanApName $R.Key; $R.Ap = $script:Wplan.Aps[$R.Key] }
+    return @($Rows.Values | Sort-Object { $_.Name })
+}
+
+function Export-WhPowerCsv {
+    if (-not $script:Wplan) { return }
+    $F = Show-SaveFile "Таблица мощностей" "CSV для Excel (*.csv)|*.csv" "$($script:Wplan.Site) — мощности точек.csv"
+    if (-not $F) { return }
+    $L = @("Точка;MAC;IP;2.4 канал;2.4 ширина МГц;2.4 мощность dBm;5 канал;5 ширина МГц;5 мощность dBm;ключ")
+    foreach ($R in @(Get-WhApRows)) {
+        $A = $R.Ap; $A24 = $(if ($A -and $A.Air) { $A.Air["2.4"] } else { $null }); $A5 = $(if ($A -and $A.Air) { $A.Air["5"] } else { $null })
+        # every cell is a string: an if without a value would drop out of the array and shift the columns
+        $Cells = @("$($R.Name)", "$($R.Mac)", "$($R.Ip)", "$(if ($A24) { $A24.Ch })", "$(if ($A24) { $A24.W })", "$(if ($A) { $A.Tx24 })", "$(if ($A5) { $A5.Ch })", "$(if ($A5) { $A5.W })", "$(if ($A) { $A.Tx5 })", "$($R.Key)")
+        $L += (@($Cells | ForEach-Object { $_ -replace ';', ',' }) -join ";")
+    }
+    # UTF-8 with BOM — Excel opens Cyrillic correctly
+    [IO.File]::WriteAllText($F, ($L -join "`r`n"), [Text.UTF8Encoding]::new($true))
+    Show-Toast "Таблица сохранена — впиши мощности (Omada → Devices → точка → Config → Radios) и загрузи обратно"
+    try { Start-Process $F } catch { }
+}
+
+function Import-WhPowerCsv {
+    if (-not $script:Wplan) { return }
+    $F = @(Show-OpenFiles "Таблица мощностей" "CSV (*.csv;*.txt)|*.csv;*.txt") | Select-Object -First 1
+    if (-not $F) { return }
+    $Lines = @([IO.File]::ReadAllLines($F, [Text.Encoding]::UTF8) | Where-Object { $_.Trim() })
+    if ($Lines.Count -lt 2) { Show-Toast "В файле нет строк" "warn"; return }
+    $Sep = $(if (($Lines[0].Split(';')).Count -ge ($Lines[0].Split(',')).Count) { ';' } else { ',' })
+    $Hd = @($Lines[0].Split($Sep) | ForEach-Object { $_.Trim().Trim('"').ToLower() })
+    $Col = { param([string]$Re) for ($i = 0; $i -lt $Hd.Count; $i++) { if ($Hd[$i] -match $Re) { return $i } }; return -1 }
+    $Ci = @{ Name = (& $Col '^точка|^name|^ap'); Mac = (& $Col 'mac'); Key = (& $Col '^ключ|^key'); P24 = (& $Col '^2[\.,]4.*(мощн|power|tx)'); P5 = (& $Col '^5.*(мощн|power|tx)') }
+    if ($Ci.P24 -lt 0 -and $Ci.P5 -lt 0) { Show-Toast "Не нашёл столбцы мощности («2.4 мощность dBm», «5 мощность dBm»)" "warn"; return }
+    $ByName = @{}; foreach ($R in @(Get-WhApRows)) { $ByName[$R.Name.ToLower()] = $R.Key }
+    $N = 0; $Miss = @()
+    foreach ($Ln in @($Lines | Select-Object -Skip 1)) {
+        $V = @($Ln.Split($Sep) | ForEach-Object { $_.Trim().Trim('"') })
+        $Get = { param($I) if ($I -ge 0 -and $I -lt $V.Count) { $V[$I] } else { "" } }
+        $K = & $Get $Ci.Key
+        if (-not $K -and (& $Get $Ci.Mac)) { $K = Get-WplanKey (& $Get $Ci.Mac) }
+        if (-not $K -and (& $Get $Ci.Name)) { $K = $ByName[(& $Get $Ci.Name).ToLower()] }
+        if (-not $K) { $Miss += (& $Get $Ci.Name); continue }
+        if (-not $script:Wplan.Aps.ContainsKey($K)) { $script:Wplan.Aps[$K] = @{ Name = ""; Tx24 = ""; Tx5 = ""; Bssids = @() } }
+        $A = $script:Wplan.Aps[$K]
+        $T24 = "$(& $Get $Ci.P24)" -replace '[^\d]', ''; $T5 = "$(& $Get $Ci.P5)" -replace '[^\d]', ''
+        if ($T24) { $A.Tx24 = $T24 }; if ($T5) { $A.Tx5 = $T5 }
+        if ($T24 -or $T5) { $N++ }
+    }
+    $script:WplanLastReport = $null
+    Save-Wplan; Update-WhPrep
+    Show-Toast "Мощности загружены: $N точек$(if ($Miss.Count) { " · не опознаны: $($Miss -join ', ')" })" $(if ($Miss.Count) { "warn" } else { "info" })
+}
+
+# air vs the calculated plan: channel and width per AP and band
+function Start-WhVerify {
+    $R = $script:WplanLastReport
+    if (-not $R -or $R.Error) { Use-WplanSite; $R = Invoke-WplanCalc; $script:WplanLastReport = $R }
+    if (-not $R -or $R.Error) { Show-Toast "Нет расчёта — сначала замеры" "warn"; return }
+    $Ui.WhVerify.IsEnabled = $false
+    $Ui.WhVerifyText.Visibility = "Visible"; $Ui.WhVerifyText.Foreground = Get-Brush "Sub"; $Ui.WhVerifyText.Text = "Читаю эфир (~12 с)…"
+    Start-WhAirRead -Label "Сверяю эфир с планом" -Then {
+        param($Seen)
+        $Ui.WhVerify.IsEnabled = $true
+        $R = $script:WplanLastReport
+        $Ok = 0; $Bad = @(); $NotSeen = @()
+        foreach ($B in @("2.4", "5")) {
+            if (-not $R.Bands.Contains($B)) { continue }
+            $P = $R.Bands[$B]
+            foreach ($K in $P.Keys) {
+                $Want = $P.Channels.Assign[$K] | Select-Object -First 1
+                if (-not $Want) { continue }
+                $A = $script:Wplan.Aps[$K]; $X = $(if ($A -and $A.Air) { $A.Air[$B] } else { $null })
+                $Nm = Get-WplanApName $K
+                if (-not $X -or $Seen -notcontains $K) { $NotSeen += "$Nm $B"; continue }
+                $E = @()
+                if ([int]$X.Ch -ne [int]$Want) { $E += "канал $($X.Ch), нужно $Want" }
+                if ($B -eq "5" -and [int]$X.W -ne [int]$P.Channels.Width) { $E += "ширина $($X.W), нужно $($P.Channels.Width)" }
+                if ($E.Count) { $Bad += "✖ $Nm $B ГГц: $($E -join '; ')" } else { $Ok++ }
+            }
+        }
+        $T = @("✔ совпадает с планом: $Ok") + $Bad
+        if ($NotSeen.Count) { $T += "· не видно отсюда (подойди ближе и проверь ещё раз): $($NotSeen -join ', ')" }
+        $T += "Мощность в эфире не видна — её сверить нельзя, только по Omada."
+        $Ui.WhVerifyText.Text = $T -join "`n"
+        $Ui.WhVerifyText.Foreground = Get-Brush $(if ($Bad.Count) { "Warn" } else { "Ok" })
+        if (-not $Bad.Count -and -not $NotSeen.Count -and $Ok) { (Get-WhState).Applied = $true; $Ui.WhApplied.IsChecked = $true; Save-Wplan; Update-WhStepper }
+    }
 }
 
 # ---------------------------------------------------------------- roaming results per phase
@@ -381,6 +519,10 @@ function Initialize-WifiHub {
     $Ui.WhTest.Add_Click({ $R = Get-MtRouter "$($Ui.WhRouter.SelectedValue)"; if ($R) { Set-MtStatus "$($R.Name): подключаюсь…" "wait"; Test-MtRouter $R } else { Show-Toast "Выбери роутер" "warn" } })
     $Ui.WhApsRefresh.Add_Click({ $R = Get-MtRouter "$($Ui.WhRouter.SelectedValue)"; if ($R) { Start-MtApRefresh $R { param($A) Update-WhPrep } } else { Show-Toast "Выбери роутер" "warn" } })
     $Ui.WhAps.Add_MouseDoubleClick({ Open-WhApDialog })
+    $Ui.WhReadAir.Add_Click({ Start-WhAirRead { param($S) Update-WhPrep } })
+    $Ui.WhCsvOut.Add_Click({ Export-WhPowerCsv })
+    $Ui.WhCsvIn.Add_Click({ Import-WhPowerCsv })
+    $Ui.WhVerify.Add_Click({ Start-WhVerify })
     $Ui.WhCopySheet.Add_Click({ Use-WplanSite; $T = Get-WplanSheet; if ($T) { Copy-Text $T "лист для Omada" } else { Show-Toast "Нет расчёта — сначала замеры" "warn" } })
     $Ui.WhApplied.Add_Click({ if ($script:Wplan) { (Get-WhState).Applied = [bool]$Ui.WhApplied.IsChecked; Save-Wplan; Update-WhStepper } })
     $Ui.WhAdopt.Add_Click({

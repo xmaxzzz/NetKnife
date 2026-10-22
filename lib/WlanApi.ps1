@@ -13,6 +13,8 @@ namespace NetKnife {
     public class BssInfo {
         public string Ssid; public string Bssid; public int Rssi; public int Quality;
         public int FreqMHz; public int Channel; public string Band; public string Iface;
+        // from the beacon (information elements): channel width, 802.11k/v/r, security, country
+        public int Width = 20; public bool K; public bool V; public bool R; public string Sec = ""; public string Country = "";
     }
 
     public static class Wlan {
@@ -34,6 +36,41 @@ namespace NetKnife {
         // WLAN_BSS_ENTRY is 360 bytes; offsets per wlanapi.h (natural alignment)
         const int EntrySize = 360, OffBssid = 40, OffRssi = 56, OffQuality = 60, OffHostTs = 80, OffFreq = 92;
         const int IfaceInfoSize = 532;   // GUID + WCHAR[256] + state
+        const int OffIeOffset = 352, OffIeSize = 356;
+
+        // HT/VHT operation → 20/40/80/160; RM capabilities (11k), extended caps bit 19 (11v BSS transition),
+        // Mobility Domain (11r), RSN AKM suites (PSK / SAE / FT), Country
+        static void ParseIe(BssInfo b, byte[] ie) {
+            bool ht40 = false; int vht = -1, c0 = 0, c1 = 0; bool psk = false, sae = false, ent = false, open = true;
+            for (int p = 0; p + 2 <= ie.Length; ) {
+                int id = ie[p], len = ie[p + 1], d = p + 2;
+                if (d + len > ie.Length) break;
+                if (id == 61 && len >= 2) { int off = ie[d + 1] & 3; ht40 = (off == 1 || off == 3) && ((ie[d + 1] >> 2) & 1) == 1; }
+                else if (id == 192 && len >= 3) { vht = ie[d]; c0 = ie[d + 1]; c1 = ie[d + 2]; }
+                else if (id == 70) b.K = true;
+                else if (id == 127 && len >= 3) b.V = ((ie[d + 2] >> 3) & 1) == 1;
+                else if (id == 54) b.R = true;
+                else if (id == 7 && len >= 2) b.Country = "" + (char)ie[d] + (char)ie[d + 1];
+                else if (id == 48 && len >= 8) {
+                    open = false;
+                    int pc = ie[d + 6] | (ie[d + 7] << 8); int ap = d + 8 + 4 * pc;
+                    if (ap + 2 <= d + len) {
+                        int ac = ie[ap] | (ie[ap + 1] << 8);
+                        for (int q = 0; q < ac && ap + 2 + 4 * q + 3 < d + len; q++) {
+                            int t = ie[ap + 2 + 4 * q + 3];
+                            if (t == 2 || t == 4 || t == 6) psk = true; else if (t == 8 || t == 9) sae = true; else if (t == 1 || t == 3 || t == 5) ent = true;
+                            if (t == 3 || t == 4 || t == 9) b.R = true;
+                        }
+                    }
+                }
+                p = d + len;
+            }
+            int w = ht40 ? 40 : 20;
+            if (vht == 1) w = (c1 != 0 && Math.Abs(c1 - c0) == 8) ? 160 : 80;
+            else if (vht == 2 || vht == 3) w = 160;
+            b.Width = w;
+            b.Sec = open ? "open" : ent ? "enterprise" : (psk && sae) ? "WPA2/WPA3" : sae ? "WPA3" : psk ? "WPA2" : "?";
+        }
 
         public static List<BssInfo> Scan(int waitMs) {
             var result = new List<BssInfo>();
@@ -85,6 +122,10 @@ namespace NetKnife {
                                 Band = freq < 3000 ? "2.4" : (freq < 5925 ? "5" : "6"),
                                 Iface = f.Value
                             };
+                            try {
+                                int ieo = Marshal.ReadInt32(e, OffIeOffset), ies = Marshal.ReadInt32(e, OffIeSize);
+                                if (ieo > 0 && ies > 0 && ies < 4096) { byte[] ie = new byte[ies]; Marshal.Copy(e + ieo, ie, 0, ies); ParseIe(b, ie); }
+                            } catch { }
                             if (ts > maxTs) maxTs = ts;
                             tmp.Add(new KeyValuePair<long, BssInfo>(ts, b));
                         }

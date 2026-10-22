@@ -211,14 +211,14 @@ $script:WplanScanBody = {
         if ($Ctl.Stop) { return }
         try { $L = [NetKnife.Wlan]::Scan(3200) } catch { $Q.Enqueue(@{ Type = "wpscan"; Error = "$($_.Exception.Message)" }); return }
         foreach ($B in $L) {
-            if (-not $Acc.ContainsKey($B.Bssid)) { $Acc[$B.Bssid] = @{ Bssid = $B.Bssid; Ssid = $B.Ssid; Ch = $B.Channel; Band = $B.Band; R = [System.Collections.Generic.List[int]]::new() } }
+            if (-not $Acc.ContainsKey($B.Bssid)) { $Acc[$B.Bssid] = @{ Bssid = $B.Bssid; Ssid = $B.Ssid; Ch = $B.Channel; Band = $B.Band; W = $B.Width; K = $B.K; V = $B.V; Rr = $B.R; Sec = $B.Sec; Cc = $B.Country; R = [System.Collections.Generic.List[int]]::new() } }
             $Acc[$B.Bssid].R.Add($B.Rssi)
         }
         $Q.Enqueue(@{ Type = "wpround"; N = $i; Total = $Rounds; Count = $Acc.Count })
     }
     $Out = foreach ($A in $Acc.Values) {
         $S = @($A.R | Sort-Object)
-        @{ Bssid = $A.Bssid; Ssid = $A.Ssid; Ch = $A.Ch; Band = $A.Band; Rssi = $S[[int][Math]::Floor(($S.Count - 1) / 2)]; Seen = $S.Count }
+        @{ Bssid = $A.Bssid; Ssid = $A.Ssid; Ch = $A.Ch; Band = $A.Band; Rssi = $S[[int][Math]::Floor(($S.Count - 1) / 2)]; Seen = $S.Count; W = $A.W; K = $A.K; V = $A.V; R = $A.Rr; Sec = $A.Sec; Cc = $A.Cc }
     }
     $Q.Enqueue(@{ Type = "wpscan"; Samples = @($Out) })
 }
@@ -260,13 +260,29 @@ function Start-WplanMeasure {
 
 function Register-WplanAps {
     param($Samples)
+    $Now = Get-Date -Format "yyyy-MM-dd HH:mm"
     foreach ($S in @($Samples)) {
         if (-not (Test-WplanOurs $S)) { continue }
         $K = Get-WplanKey $S.Bssid
         if (-not $script:Wplan.Aps.ContainsKey($K)) { $script:Wplan.Aps[$K] = @{ Name = ""; Tx24 = ""; Tx5 = ""; Bssids = @() } }
         $A = $script:Wplan.Aps[$K]
         if (@($A.Bssids) -notcontains $S.Bssid) { $A.Bssids = @($A.Bssids) + @($S.Bssid) }
+        if ($null -ne $S.W -and $S.Ch) {
+            if (-not $A.Air) { $A.Air = @{} }
+            $A.Air[$S.Band] = @{ Ch = [int]$S.Ch; W = [int]$S.W; T = $Now }
+            $A.Air.K = [bool]$S.K; $A.Air.V = [bool]$S.V; $A.Air.R = [bool]$S.R
+            if (-not $A.Air.Sec -or "$($S.Sec)" -match '/') { $A.Air.Sec = "$($S.Sec)" }   # the main SSID (mixed WPA2/WPA3) wins over the IoT one
+            if ($S.Cc) { $script:Wplan.AirCountry = "$($S.Cc)" }
+        }
     }
+}
+
+# «2.4: к1/20 · 5: к100/40» from the air, or ""
+function Format-WplanAir {
+    param($A)
+    if (-not $A -or -not $A.Air) { return "" }
+    $L = @(foreach ($B in @("2.4", "5")) { $X = $A.Air[$B]; if ($X) { "$B к$($X.Ch)/$($X.W)" } })
+    return ($L -join " · ")
 }
 
 # ---------------------------------------------------------------- analysis

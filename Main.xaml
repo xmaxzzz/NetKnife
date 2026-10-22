@@ -1013,10 +1013,14 @@
                                             <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8A5;" Style="{StaticResource Glyph}"/><TextBlock Text="Лист для Omada"/></StackPanel>
                                         </Button>
                                         <CheckBox x:Name="WhApplied" Style="{StaticResource Switch}" Content="Внёс значения в Omada" VerticalAlignment="Center" Margin="0,0,14,0"/>
+                                        <Button x:Name="WhVerify" Style="{StaticResource Btn}" Padding="12,6" Margin="0,0,8,0" ToolTip="Сверить каналы и ширину в эфире с планом — видно, что применилось в Omada">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9D5;" Style="{StaticResource Glyph}"/><TextBlock Text="Проверить внесённое"/></StackPanel>
+                                        </Button>
                                         <Button x:Name="WhAdopt" Style="{StaticResource Btn}" Padding="12,6" ToolTip="Записать рекомендованные мощности как текущие — следующий расчёт пойдёт от них">
                                             <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE73E;" Style="{StaticResource Glyph}"/><TextBlock Text="Принять как текущие"/></StackPanel>
                                         </Button>
                                     </WrapPanel>
+                                    <TextBlock x:Name="WhVerifyText" FontFamily="{StaticResource MonoFont}" FontSize="12" TextWrapping="Wrap" Margin="0,10,0,0" Visibility="Collapsed"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top" Margin="16,0,0,0">
                                     <Button x:Name="WhPrev" Style="{StaticResource Btn}" Padding="14,8">
@@ -1073,7 +1077,12 @@
                                     <Border Style="{StaticResource CardBox}" Margin="0,8,0,0">
                                         <StackPanel>
                                             <DockPanel>
-                                                <Button x:Name="WhApsRefresh" DockPanel.Dock="Right" Style="{StaticResource GhostBtn}" Padding="10,4"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" Style="{StaticResource Glyph}" FontSize="12"/><TextBlock Text="Обновить с роутера"/></StackPanel></Button>
+                                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                                    <Button x:Name="WhReadAir" Style="{StaticResource GhostBtn}" Padding="10,4" Margin="0,0,4,0" ToolTip="Канал и ширина каждой точки, 802.11k/v/r, безопасность, страна — из служебных кадров точек (контроллер не нужен)"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE701;" Style="{StaticResource Glyph}" FontSize="12"/><TextBlock Text="Считать из эфира"/></StackPanel></Button>
+                                                    <Button x:Name="WhCsvOut" Style="{StaticResource GhostBtn}" Padding="10,4" Margin="0,0,4,0" ToolTip="Таблица точек с каналами и шириной из эфира — впиши мощности из Omada и загрузи обратно"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74E;" Style="{StaticResource Glyph}" FontSize="12"/><TextBlock Text="CSV для мощностей"/></StackPanel></Button>
+                                                    <Button x:Name="WhCsvIn" Style="{StaticResource GhostBtn}" Padding="10,4" Margin="0,0,4,0" ToolTip="Загрузить заполненную таблицу: мощности встанут в план"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B5;" Style="{StaticResource Glyph}" FontSize="12"/><TextBlock Text="Загрузить CSV"/></StackPanel></Button>
+                                                    <Button x:Name="WhApsRefresh" Style="{StaticResource GhostBtn}" Padding="10,4"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" Style="{StaticResource Glyph}" FontSize="12"/><TextBlock Text="Обновить с роутера"/></StackPanel></Button>
+                                                </StackPanel>
                                                 <TextBlock Text="ТОЧКИ ОБЪЕКТА  (2×клик — имя и текущая мощность из Omada)" Style="{StaticResource Caption}" VerticalAlignment="Center"/>
                                             </DockPanel>
                                             <ListBox x:Name="WhAps" Height="190" Margin="0,6,0,0" Background="Transparent" BorderThickness="1" BorderBrush="{StaticResource Line}" Foreground="{StaticResource Text}" FontFamily="{StaticResource MonoFont}" FontSize="12"/>
