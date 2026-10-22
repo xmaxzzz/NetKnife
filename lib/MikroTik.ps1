@@ -16,7 +16,13 @@ $script:MtApPattern = '([0-9A-Fa-f]{2}-){5}[0-9A-Fa-f]{2}'   # Omada AP DHCP hos
 function Get-MtRouters { return @($script:Settings.Routers | Where-Object { $_ -and $_.Id }) }
 
 # cached AP list of a router (from its last DHCP read); empty when never read
-function Get-MtCachedAps { param([string]$Id) if ($script:Settings.MtAps -and $Id -and $script:Settings.MtAps.ContainsKey($Id)) { return @($script:Settings.MtAps[$Id]) }; return @() }
+function Get-MtCachedAps {
+    param([string]$Id)
+    if (-not ($script:Settings.MtAps -and $Id -and $script:Settings.MtAps.ContainsKey($Id))) { return @() }
+    $L = @($script:Settings.MtAps[$Id] | Where-Object { $_ })
+    foreach ($A in $L) { if ($A.Mac) { $A.Key = Get-MtApKey "$($A.Mac)" } }
+    return $L
+}
 
 function Get-MtRouter { param([string]$Id) return @(Get-MtRouters) | Where-Object { $_.Id -eq $Id } | Select-Object -First 1 }
 
@@ -75,7 +81,9 @@ function Get-MtApKey {
     param([string]$Mac)
     $O = $Mac.ToUpper() -split '[:-]'
     if ($O.Count -ne 6) { return $Mac }
-    return "{0}:{1}:{2}:{3}:{4:X2}" -f $O[1], $O[2], $O[3], $O[4], ([Convert]::ToInt32($O[5], 16) -band 0xF8)
+    # Omada: 2.4 GHz BSSID = device MAC, 5 GHz = MAC + 1, extra SSIDs flip bits in the first octet. Masking more
+    # than the lowest bit merges neighbouring APs (…AF:7A and …AF:7E were one «AP» until v2026.10.15.30).
+    return "{0}:{1}:{2}:{3}:{4:X2}" -f $O[1], $O[2], $O[3], $O[4], ([Convert]::ToInt32($O[5], 16) -band 0xFE)
 }
 
 function ConvertFrom-MtLeases {
@@ -114,6 +122,11 @@ function Repair-MtApCache {
     $Ch = $false
     if ($script:Settings.MtApNames) { foreach ($K in @($script:Settings.MtApNames.Keys)) { if ("$($script:Settings.MtApNames[$K])" -match $Bad) { $script:Settings.MtApNames.Remove($K); $Ch = $true } } }
     if ($script:Settings.MtAps) { foreach ($Id in @($script:Settings.MtAps.Keys)) { foreach ($A in @($script:Settings.MtAps[$Id])) { if ($A -and "$($A.Name)" -match $Bad) { $A.Name = ""; $Ch = $true } } } }
+    if (-not $script:Settings.MtKeyV -or $script:Settings.MtKeyV -lt 2) {
+        $Nm = @{}
+        if ($script:Settings.MtAps) { foreach ($Id in @($script:Settings.MtAps.Keys)) { foreach ($A in @($script:Settings.MtAps[$Id] | Where-Object { $_ })) { if ($A.Mac -and $A.Name) { $Nm[(Get-MtApKey "$($A.Mac)")] = "$($A.Name)" } } } }
+        $script:Settings.MtApNames = $Nm; $script:Settings.MtKeyV = 2; $Ch = $true
+    }
     if ($Ch) { Save-Settings }
 }
 

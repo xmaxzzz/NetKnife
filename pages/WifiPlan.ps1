@@ -93,7 +93,7 @@ function Get-WplanSites {
 
 function New-WplanOpt { return @{ Offset = 6; Cap5 = 20; Cap24 = 17 } }
 
-function New-Wplan { param([string]$Site) return @{ Site = $Site; Ssids = @(); Aps = @{}; Merge = @{}; Points = @(); CurSeries = $script:WplanBaseSeries; Opt = (New-WplanOpt) } }
+function New-Wplan { param([string]$Site) return @{ Site = $Site; Ssids = @(); Aps = @{}; Merge = @{}; Points = @(); CurSeries = $script:WplanBaseSeries; Opt = (New-WplanOpt); KeyV = 2 } }
 
 function Read-Wplan {
     param([string]$Site)
@@ -109,10 +109,49 @@ function Read-Wplan {
             $W.Opt = $O
             foreach ($P2 in @($W.Points)) { if (-not $P2.Series) { $P2.Series = $script:WplanBaseSeries }; if (-not $P2.Kind) { $P2.Kind = "room" } }
             $W.Site = $Site
+            if (-not $W.KeyV -or $W.KeyV -lt 2) { try { Convert-WplanKeysV2 $W } catch { Write-AppLog "wplan keys v2 ${Site}: $_" } }
             return $W
         } catch { Write-AppLog "wplan read ${Site}: $_" }
     }
     return New-Wplan $Site
+}
+
+# v1 → v2 AP keys: an old group may hold several APs — split it by BSSID; the stored name, power and plan
+# position go to the AP whose router (DHCP) name matches, the others start fresh (names come from the router)
+function Convert-WplanKeysV2 {
+    param($W)
+    $Old = $W.Aps; $New = @{}; $Moved = @{}
+    $RouterName = @{}
+    if ($script:Settings.MtAps) { foreach ($Id in @($script:Settings.MtAps.Keys)) { foreach ($A in @($script:Settings.MtAps[$Id] | Where-Object { $_ })) { if ($A.Mac -and $A.Name) { $RouterName[(Get-MtApKey "$($A.Mac)")] = "$($A.Name)" } } } }
+    $W.Merge = @{}   # manual merges were made on old keys
+    foreach ($K in @($Old.Keys)) {
+        $A = $Old[$K]
+        $Groups = [ordered]@{}
+        foreach ($B in @($A.Bssids | Where-Object { $_ })) {
+            $O = "$B".ToUpper() -split '[:-]'
+            if ($O.Count -ne 6) { continue }
+            $Nk = "{0}:{1}:{2}:{3}:{4:X2}" -f $O[1], $O[2], $O[3], $O[4], ([Convert]::ToInt32($O[5], 16) -band 0xFE)
+            if (-not $Groups.Contains($Nk)) { $Groups[$Nk] = [System.Collections.Generic.List[string]]::new() }
+            $Groups[$Nk].Add("$B")
+        }
+        if (-not $Groups.Count) { $New[$K] = $A; continue }
+        $Keys = @($Groups.Keys)
+        $Main = @($Keys | Where-Object { $A.Name -and $RouterName[$_] -and "$($RouterName[$_])".ToLower() -eq "$($A.Name)".ToLower() }) | Select-Object -First 1
+        if (-not $Main) { $Main = @($Keys | Sort-Object { -$Groups[$_].Count }, { $_ }) | Select-Object -First 1 }
+        foreach ($Nk in $Keys) {
+            if ($Nk -eq $Main) { $A.Bssids = @($Groups[$Nk]); $New[$Nk] = $A }
+            elseif (-not $New.ContainsKey($Nk)) { $New[$Nk] = @{ Name = ""; Tx24 = ""; Tx5 = ""; Bssids = @($Groups[$Nk]) } }
+        }
+        $Moved[$K] = $Main
+    }
+    $W.Aps = $New
+    if ($W.Floor -and $W.Floor.Aps) {
+        $Fa = @{}
+        foreach ($K in @($W.Floor.Aps.Keys)) { $Nk = $(if ($Moved.ContainsKey($K)) { $Moved[$K] } else { $K }); if (-not $Fa.ContainsKey($Nk)) { $Fa[$Nk] = $W.Floor.Aps[$K] } }
+        $W.Floor.Aps = $Fa
+    }
+    $W.KeyV = 2
+    $script:WplanKeysMigrated = $W.Site
 }
 
 function Save-Wplan {
@@ -132,13 +171,14 @@ function Get-WplanSeriesList {
 
 # ---------------------------------------------------------------- grouping BSSIDs into physical APs
 # Omada: 2.4 GHz radio = base MAC, 5 GHz = base+1, extra SSIDs flip bits in the first octet. So the group key
-# ignores the first octet and the 3 low bits of the last one. Manual merges (plan.Merge) override.
+# ignores the first octet and the lowest bit of the last one (v1 masked 3 bits and merged neighbouring APs).
+# Manual merges (plan.Merge) override.
 
 function Get-WplanKey {
     param([string]$Bssid)
     $O = $Bssid.ToUpper() -split '[:-]'
     if ($O.Count -ne 6) { return $Bssid }
-    $Last = [Convert]::ToInt32($O[5], 16) -band 0xF8
+    $Last = [Convert]::ToInt32($O[5], 16) -band 0xFE   # only the lowest bit: 5 GHz = MAC + 1 (see Get-MtApKey)
     $K = "{0}:{1}:{2}:{3}:{4:X2}" -f $O[1], $O[2], $O[3], $O[4], $Last
     $M = $script:Wplan.Merge
     $Guard = 0
