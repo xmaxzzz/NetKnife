@@ -39,7 +39,7 @@ function Start-Walk {
     if (-not (Test-Path $script:WplanDir)) { New-Item -ItemType Directory -Path $script:WplanDir | Out-Null }
     $script:Walk = @{ Id = $Id; Phase = $Phase; Series = $Series; Running = $true; Started = [DateTime]::Now; Base = $Base; Wav = ""; Mic = $null
         Clicks = [System.Collections.Generic.List[object]]::new(); Scans = [System.Collections.Generic.List[object]]::new(); Conn = [System.Collections.Generic.List[object]]::new()
-        Marks = [System.Collections.Generic.List[object]]::new(); Events = @(); Words = @(); Phrases = @(); Timeline = @(); Notes = @(); ScanUntil = [DateTime]::MinValue; ScanErr = "" }
+        Marks = [System.Collections.Generic.List[object]]::new(); Events = @(); Words = @(); Phrases = @(); Timeline = @(); Notes = @(); ScanUntil = [DateTime]::MinValue; ScanErr = ""; CpNext = 0 }
     # microphone
     $Mic = [NetKnife.MicRec]::new()
     if ($Mic.Start("$Base.wav")) { $script:Walk.Mic = $Mic; $script:Walk.Wav = "$Base.wav"; $script:Walk.Started = $Mic.Started }
@@ -63,6 +63,7 @@ function Start-Walk {
         }
     })
     $Ui.WkStart.IsEnabled = $false; $Ui.WkStop.IsEnabled = $true; $Ui.WkMark.IsEnabled = $true
+    Update-WalkCheckButton
     $Ui.WkResult.Text = ""
     if (-not $script:WalkTimer) {
         $script:WalkTimer = New-Object System.Windows.Threading.DispatcherTimer
@@ -92,6 +93,29 @@ function Add-WalkMark {
     Show-Toast "Отметка $(Format-WalkTime $T)"
 }
 
+# «Дошёл до N»: the engineer is at the next route checkpoint — an exact position at this moment
+function Add-WalkCheckpoint {
+    $K = $script:Walk; if (-not $K -or -not $K.Running) { return }
+    $L = @((Get-Floor).Route)
+    if ($K.CpNext -ge $L.Count) { return }
+    $Cp = $L[$K.CpNext]
+    $K.Clicks.Add(@{ T = (Get-WalkSec ([DateTime]::Now)); X = [double]$Cp.X; Y = [double]$Cp.Y; Cp = $K.CpNext })
+    $K.CpNext++
+    Update-WalkCheckButton
+    Update-WalkView
+}
+
+function Update-WalkCheckButton {
+    $K = $script:Walk
+    $L = @((Get-Floor).Route)
+    $Ui.WkCheck.Visibility = $(if ($L.Count) { "Visible" } else { "Collapsed" })
+    if (-not $L.Count) { return }
+    $Run = [bool]($K -and $K.Running)
+    $N = $(if ($Run) { [int]$K.CpNext } else { 0 })
+    $Ui.WkCheck.IsEnabled = ($Run -and $N -lt $L.Count)
+    $Ui.WkCheckText.Text = $(if ($N -lt $L.Count) { "Дошёл до $(Get-FloorCpName $L[$N] $N)" } else { "Маршрут пройден" })
+}
+
 function Add-WalkClick {
     param([double]$X, [double]$Y)
     $K = $script:Walk; if (-not $K -or -not $K.Running) { return }
@@ -115,6 +139,7 @@ function Stop-Walk {
     })
     $K.Events = @($Ev | Group-Object { "$($_.T)|$($_.Title)" } | ForEach-Object { $_.Group[-1] })   # a roam event is logged twice (wait → result)
     $Ui.WkStart.IsEnabled = $true; $Ui.WkStop.IsEnabled = $false; $Ui.WkMark.IsEnabled = $false
+    Update-WalkCheckButton
     Save-WalkFile
     if ($K.Wav -and (Test-Path $K.Wav)) {
         if (Test-WhisperReady) { Start-WalkTranscribe }
@@ -183,6 +208,8 @@ function Read-WalkFile {
             Clicks = [System.Collections.Generic.List[object]]::new(); Scans = [System.Collections.Generic.List[object]]::new(); Conn = [System.Collections.Generic.List[object]]::new(); Marks = [System.Collections.Generic.List[object]]::new()
             Events = @($J.Events); Words = @($J.Words); Phrases = @($J.Phrases); Timeline = @($J.Timeline); Notes = @($J.Notes) }
         foreach ($N in @("Clicks", "Scans", "Conn", "Marks")) { foreach ($X in @($J[$N])) { if ($X) { $K[$N].Add($X) } } }
+        $Cps = @($K.Clicks | Where-Object { $null -ne $_.Cp } | ForEach-Object { [int]$_.Cp })
+        $K.CpNext = $(if ($Cps.Count) { ($Cps | Measure-Object -Maximum).Maximum + 1 } else { 0 })   # reached checkpoints on the map
         return $K
     } catch { Write-AppLog "walk read ${Id}: $_"; return $null }
 }
@@ -588,6 +615,7 @@ function Show-WalkStep {
     $Ui.WkMark.IsEnabled = $Ui.WkStop.IsEnabled
     $Ui.WkAi.IsEnabled = [bool]($script:Walk -and -not $script:Walk.Running)
     $Ui.WkRetx.IsEnabled = [bool]($script:Walk -and -not $script:Walk.Running -and $script:Walk.Wav -and (Test-Path $script:Walk.Wav))
+    Update-WalkCheckButton
     Set-WalkWhisperStatus $(if (Test-WhisperReady) { "Распознавание речи готово (Whisper, $(Get-WhisperModel), офлайн)" } else { "Распознавание речи не установлено — голос запишется, расшифровка после установки" }) $(if (Test-WhisperReady) { "ok" } else { "sub" })
     Update-WalkView
 }
@@ -600,6 +628,15 @@ function Initialize-WalkPage {
     $Ui.WkStart.Add_Click({ Start-Walk $script:WalkPhase })
     $Ui.WkStop.Add_Click({ Stop-Walk })
     $Ui.WkMark.Add_Click({ Add-WalkMark })
+    $Ui.WkCheck.Add_Click({ Add-WalkCheckpoint })
+    # Space = «Дошёл» while walking (hands busy with the laptop)
+    $script:Win.Add_PreviewKeyDown({
+        param($S, $E)
+        if ($E.Key -ne "Space" -or -not ($script:Walk -and $script:Walk.Running) -or -not $Ui.PageWalk.IsVisible) { return }
+        if ([System.Windows.Input.Keyboard]::FocusedElement -is [System.Windows.Controls.TextBox]) { return }
+        if (@((Get-Floor).Route).Count) { Add-WalkCheckpoint } else { Add-WalkMark }
+        $E.Handled = $true
+    })
     $Ui.WkAi.Add_Click({ Start-WalkAi })
     $Ui.WkRetx.Add_Click({ if (Test-WhisperReady) { Start-WalkTranscribe } else { Install-Whisper { param($T, $Kd) Set-WalkWhisperStatus $T $Kd } { Start-WalkTranscribe } } })
     $Ui.WkRebuild.Add_Click({ if ($script:Walk -and -not $script:Walk.Running) { Complete-Walk } })

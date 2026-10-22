@@ -105,7 +105,7 @@ function Save-FloorBitmap {
     $Keep = ($F.W -and [Math]::Abs($F.W / [Math]::Max(1, $F.H) - $Bmp.PixelWidth / [double]$Bmp.PixelHeight) -lt 0.02)
     $F.Image = $Name; $F.W = $Bmp.PixelWidth; $F.H = $Bmp.PixelHeight
     if (-not $Keep -and (@($F.Rooms).Count -or $F.Aps.Count)) {
-        if (Show-Confirm "Новый план другой формы" "Пропорции картинки изменились — помещения, точки и масштаб, заданные на старом плане, окажутся не на своих местах. Убрать их?" "Убрать") { $F.Rooms = @(); $F.Aps = @{}; $F.Scale = $null }
+        if (Show-Confirm "Новый план другой формы" "Пропорции картинки изменились — помещения, точки, маршрут и масштаб, заданные на старом плане, окажутся не на своих местах. Убрать их?" "Убрать") { $F.Rooms = @(); $F.Aps = @{}; $F.Scale = $null; $F.Route = @() }
     }
     Save-Wplan
     Update-FloorPage
@@ -140,30 +140,60 @@ function Convert-FloorFrame {
     $Pt.X = [Math]::Round([double]$Pt.X, 5); $Pt.Y = [Math]::Round([double]$Pt.Y, 5)
 }
 
-# moves everything placed on the plan into the new frame (or back out of it)
+# a rectangle {X;Y;W;H} through a point mapping (corners mapped, then normalised — rotation swaps them)
+function Convert-FloorRect {
+    param($Rc, [scriptblock]$Map)
+    $A = @{ X = $Rc.X; Y = $Rc.Y }; $B = @{ X = $Rc.X + $Rc.W; Y = $Rc.Y + $Rc.H }
+    & $Map $A; & $Map $B
+    $Rc.X = [Math]::Round([Math]::Min($A.X, $B.X), 5); $Rc.Y = [Math]::Round([Math]::Min($A.Y, $B.Y), 5)
+    $Rc.W = [Math]::Round([Math]::Abs($B.X - $A.X), 5); $Rc.H = [Math]::Round([Math]::Abs($B.Y - $A.Y), 5)
+}
+
+# moves everything placed on the plan: into a crop frame / back out of it, or through any point mapping ($Map)
 function Move-FloorItems {
-    param($Fr, [switch]$Back)
+    param($Fr, [switch]$Back, [scriptblock]$Map)
+    if (-not $Map) { $script:FloorMapFr = $Fr; $script:FloorMapBack = [bool]$Back; $Map = { param($Pt) Convert-FloorFrame $Pt $script:FloorMapFr -Back:$script:FloorMapBack } }
     $F = Get-Floor
-    foreach ($R in @($F.Rooms)) {
-        $P2 = @{ X = $R.X + $R.W; Y = $R.Y + $R.H }
-        Convert-FloorFrame $R $Fr -Back:$Back; Convert-FloorFrame $P2 $Fr -Back:$Back
-        $R.W = [Math]::Round($P2.X - $R.X, 5); $R.H = [Math]::Round($P2.Y - $R.Y, 5)
-    }
-    foreach ($K in @($F.Aps.Keys)) { Convert-FloorFrame $F.Aps[$K] $Fr -Back:$Back }
+    foreach ($R in @($F.Rooms)) { Convert-FloorRect $R $Map }
+    foreach ($K in @($F.Aps.Keys)) { & $Map $F.Aps[$K] }
+    foreach ($Cp in @($F.Route)) { & $Map $Cp }
     if ($F.Scale) {
         $A = @{ X = $F.Scale.X1; Y = $F.Scale.Y1 }; $B = @{ X = $F.Scale.X2; Y = $F.Scale.Y2 }
-        Convert-FloorFrame $A $Fr -Back:$Back; Convert-FloorFrame $B $Fr -Back:$Back
+        & $Map $A; & $Map $B
         $F.Scale.X1 = $A.X; $F.Scale.Y1 = $A.Y; $F.Scale.X2 = $B.X; $F.Scale.Y2 = $B.Y
     }
     # walks of this site keep their clicks on the same spot of the plan
     foreach ($Wf in @(Get-ChildItem $script:WplanDir -Filter ((Split-Path (Get-WplanPath $script:Wplan.Site "walk-") -Leaf) + "*.json") -ErrorAction SilentlyContinue)) {
         try {
             $J = Get-Content $Wf.FullName -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable
-            foreach ($C in @($J.Clicks)) { Convert-FloorFrame $C $Fr -Back:$Back }
+            foreach ($C in @($J.Clicks)) { & $Map $C }
             $J | ConvertTo-Json -Depth 8 -Compress | Set-Content -Path $Wf.FullName -Encoding UTF8
-        } catch { Write-AppLog "crop walk $($Wf.Name): $_" }
+        } catch { Write-AppLog "remap walk $($Wf.Name): $_" }
     }
-    if ($script:Walk -and -not $script:Walk.Running) { foreach ($C in @($script:Walk.Clicks)) { Convert-FloorFrame $C $Fr -Back:$Back } }
+    if ($script:Walk -and -not $script:Walk.Running) { foreach ($C in @($script:Walk.Clicks)) { & $Map $C } }
+}
+
+# rotate the sheet by 90°: $Dir = 1 clockwise, -1 counter-clockwise; the uncropped original and its crop frame too
+function Invoke-FloorRotate {
+    param([int]$Dir)
+    $F = Get-Floor; $P = Get-FloorImagePath
+    if (-not $P) { return }
+    $Rot = { param($Path) $B = Read-FloorBitmapFile $Path; return (New-Object System.Windows.Media.Imaging.TransformedBitmap($B, (New-Object System.Windows.Media.RotateTransform (90 * $script:FloorRotDir)))) }
+    $script:FloorRotDir = $Dir
+    $New = & $Rot $P
+    [void](Write-FloorPng $New "floor.png")
+    if ($F.Orig) {
+        $O = Join-Path $script:WplanDir $F.Orig
+        if (Test-Path $O) { [void](Write-FloorPng (& $Rot $O) "floor-orig.png") }
+    }
+    # CW: (x, y) → (1 − y, x); CCW: (x, y) → (y, 1 − x)
+    $Map = $(if ($Dir -gt 0) { { param($Pt) $X = [double]$Pt.X; $Pt.X = [Math]::Round(1.0 - [double]$Pt.Y, 5); $Pt.Y = [Math]::Round($X, 5) } } else { { param($Pt) $X = [double]$Pt.X; $Pt.X = [Math]::Round([double]$Pt.Y, 5); $Pt.Y = [Math]::Round(1.0 - $X, 5) } })
+    Move-FloorItems -Map $Map
+    if ($F.Crop) { Convert-FloorRect $F.Crop $Map }
+    $F.W = $New.PixelWidth; $F.H = $New.PixelHeight
+    Save-Wplan
+    Reset-FloorZoom $script:FloorView; Reset-FloorZoom $script:WalkView
+    Update-FloorPage
 }
 
 function Invoke-FloorCrop {
@@ -225,10 +255,11 @@ function Remove-Floor {
     if (-not (Show-Confirm "Удалить план?" $Msg "Удалить" -Danger)) { return }
     $P = Get-FloorImagePath
     Remove-FloorOriginal
-    $script:Wplan.Floor = @{ Image = ""; W = 0; H = 0; Rooms = @(); Aps = @{}; V = 2 }
+    $script:Wplan.Floor = @{ Image = ""; W = 0; H = 0; Rooms = @(); Aps = @{}; Route = @(); V = 2 }
     $script:FloorSelAp = ""; $script:FloorScaleMode = $false
 $script:FloorCropMode = $false
 $script:FloorPickAp = ""      # AP clicked on the plan (Delete / right-click removes, drag moves)
+$script:FloorRouteMode = $false
     Save-Wplan
     if ($P) { try { Remove-Item $P -Force } catch { Write-AppLog "floor delete: $_" } }
     if ($script:FloorView) { $script:FloorView.Bmp = $null; $script:FloorView.File = "" }
@@ -537,6 +568,27 @@ function Update-FloorView {
         foreach ($Pt in @(@{ X = $Sc.X1; Y = $Sc.Y1 }, @{ X = $Sc.X2; Y = $Sc.Y2 })) { [void](Add-FloorDot $Cv ($Pt.X * $W) ($Pt.Y * $H) (12 * $U) $Or) }
         Add-FloorText $Cv ("{0:N2} м" -f ($Sc.Mm / 1000.0)) ((($Sc.X1 + $Sc.X2) / 2) * $W) ((($Sc.Y1 + $Sc.Y2) / 2) * $H - 22 * $U) (18 * $U) $Or -Center -Bold
     }
+    # planned route with checkpoints
+    $Rt = @($F.Route)
+    if ($Rt.Count) {
+        $Sky = ConvertTo-Brush "#0EA5E9"
+        if ($Rt.Count -ge 2) {
+            $Pl = New-Object System.Windows.Shapes.Polyline
+            foreach ($Q in $Rt) { $Pl.Points.Add((New-Object System.Windows.Point ($Q.X * $W), ($Q.Y * $H))) }
+            $Pl.Stroke = $Sky; $Pl.StrokeThickness = 3 * $U; $Pl.StrokeDashArray = New-Object System.Windows.Media.DoubleCollection (, [double[]]@(3, 2)); $Pl.Opacity = $(if ($Walk) { 0.6 } else { 0.9 })
+            [void]$Cv.Children.Add($Pl)
+        }
+        $Nx = $(if ($Walk -and $null -ne $Walk.CpNext) { [int]$Walk.CpNext } else { -1 })
+        for ($i = 0; $i -lt $Rt.Count; $i++) {
+            $Q = $Rt[$i]
+            $Done = ($Walk -and $Nx -ge 0 -and $i -lt $Nx)
+            $Next = ($Walk -and $Walk.Running -and $i -eq $Nx)
+            $D = $(if ($Next) { 46 } else { 30 }) * $U
+            $Fill = $(if ($Done) { ConvertTo-Brush "#22C55E" } elseif ($Next) { ConvertTo-Brush "#F97316" } else { $Sky })
+            [void](Add-FloorDot $Cv ($Q.X * $W) ($Q.Y * $H) $D $Fill ([System.Windows.Media.Brushes]::White) (3 * $U) (Get-FloorCpName $Q $i))
+            Add-FloorText $Cv "$($i + 1)" ($Q.X * $W) ($Q.Y * $H) $(if ($Next) { 22 * $U } else { 15 * $U }) ([System.Windows.Media.Brushes]::White) -Center -Bold
+        }
+    }
     # walk overlay: route, signal of the connected AP along it, events, notes
     if ($Walk) {
         $Pts = @(Get-WalkTrack $Walk)
@@ -564,6 +616,28 @@ function Update-FloorView {
 }
 
 # ---------------------------------------------------------------- page (wizard step «План»)
+
+# route checkpoint under a plan point → index, or −1
+function Find-FloorCpAt {
+    param($P)
+    $F = Get-Floor; $V = $script:FloorView
+    if (-not $F -or -not $V.W -or -not $P) { return -1 }
+    $R = 24 * $V.W / 1000; $Best = -1; $Bd = [double]::MaxValue
+    $L = @($F.Route)
+    for ($i = 0; $i -lt $L.Count; $i++) {
+        $D = [Math]::Sqrt([Math]::Pow(([double]$L[$i].X - $P.X) * $V.W, 2) + [Math]::Pow(([double]$L[$i].Y - $P.Y) * $V.H, 2))
+        if ($D -le $R -and $D -lt $Bd) { $Best = $i; $Bd = $D }
+    }
+    return $Best
+}
+
+function Get-FloorCpName {
+    param($Cp, [int]$I)
+    $Rm = Get-FloorRoomAt ([double]$Cp.X) ([double]$Cp.Y)
+    return "$($I + 1)$(if ($Rm) { " · $($Rm.Name)" })"
+}
+
+function Set-FloorRoute { param($L) (Get-Floor).Route = @($L); Save-Wplan; Update-FloorPage }
 
 # AP marker under a plan point (fractions), nearest within the marker radius
 function Find-FloorApAt {
@@ -621,11 +695,18 @@ function Update-FloorPage {
     $Kpx = Get-FloorMPerPx
     $Ui.FlScaleText.Text = $(if ($Kpx) { "Масштаб ✔" } else { "Масштаб" })
     $Ui.FlCrop.Visibility = $(if ($Has) { "Visible" } else { "Collapsed" })
+    foreach ($Bn in @($Ui.FlRotL, $Ui.FlRotR, $Ui.FlRoute)) { $Bn.Visibility = $Ui.FlCrop.Visibility }
+    $NRt = @($F.Route).Count
+    $Ui.FlRouteText.Text = $(if ($script:FloorRouteMode) { "Маршрут: готово" } elseif ($NRt) { "Маршрут · $NRt" } else { "Маршрут" })
+    $Ui.FlRoute.Style = $script:Win.FindResource($(if ($script:FloorRouteMode) { "AccentBtn" } else { "Btn" }))
+    $Ui.FlRouteUndo.Visibility = $(if ($script:FloorRouteMode -and $NRt) { "Visible" } else { "Collapsed" })
+    $Ui.FlRouteClear.Visibility = $Ui.FlRouteUndo.Visibility
     $Ui.FlUncrop.Visibility = $(if ($Has -and $F.Crop) { "Visible" } else { "Collapsed" })
     $ScTxt = $(if (-not $Has) { "" } elseif ($Kpx) { " Масштаб: план ≈ {0:N1}×{1:N1} м." -f ($F.W * $Kpx), ($F.H * $Kpx) } else { " Масштаб не задан — кнопка «Масштаб» (расстояния и затухание стен в метрах и dB)." })
     $NPl = $(if ($F) { $F.Aps.Count } else { 0 })
     $Ui.FlCount.Text = "на плане $NPl из $($Items.Count)"
     if (-not (Get-FloorImagePath)) { $Ui.FlHint.Text = "Загрузи план: картинка или PDF (кнопка) или скриншот (Win+Shift+S → «Вставить», Ctrl+V)." }
+    elseif ($script:FloorRouteMode) { $Ui.FlHint.Text = "Маршрут: кликай по плану в порядке обхода — каждая точка получит номер (точек: $NRt). Точку можно перетащить; правый клик — удалить. «Маршрут: готово» — выйти." }
     elseif ($script:FloorCropMode) { $Ui.FlHint.Text = "Обрезка: обведи мышью ту часть плана, что нужна (зажми и тяни). Esc — отмена." }
     elseif ($script:FloorScaleMode) { $Ui.FlHint.Text = "Масштаб: проведи линию по размерной линии плана (зажми и тяни; Shift — строго по горизонтали/вертикали) и впиши её длину. Esc — отмена." }
     elseif ($script:FloorPickAp) { $Ui.FlHint.Text = "«$(Get-WplanApName $script:FloorPickAp)»: перетащи мышью — переместить; Delete или правый клик — убрать с плана." }
@@ -656,20 +737,36 @@ function Initialize-FloorPage {
     $Ui.FlScale.Add_Click({
         if (-not (Get-FloorImagePath)) { Show-Toast "Сначала загрузи план" "warn"; return }
         $script:FloorScaleMode = -not $script:FloorScaleMode
-        $script:FloorSelAp = ""; $Ui.FlRoomMode.IsChecked = $false
+        $script:FloorSelAp = ""; $script:FloorRouteMode = $false; $Ui.FlRoomMode.IsChecked = $false
         Update-FloorPage
     })
     $Ui.FlCrop.Add_Click({
         $script:FloorCropMode = -not $script:FloorCropMode
-        $script:FloorScaleMode = $false; $script:FloorSelAp = ""; $Ui.FlRoomMode.IsChecked = $false
+        $script:FloorScaleMode = $false; $script:FloorRouteMode = $false; $script:FloorSelAp = ""; $Ui.FlRoomMode.IsChecked = $false
         Reset-FloorZoom $script:FloorView
         Update-FloorPage
     })
     $Ui.FlUncrop.Add_Click({ Undo-FloorCrop })
+    $Ui.FlRotL.Add_Click({ Invoke-FloorRotate -1 })
+    $Ui.FlRotR.Add_Click({ Invoke-FloorRotate 1 })
+    $Ui.FlRoute.Add_Click({
+        $script:FloorRouteMode = -not $script:FloorRouteMode
+        $script:FloorScaleMode = $false; $script:FloorCropMode = $false; $script:FloorSelAp = ""; $script:FloorPickAp = ""; $Ui.FlRoomMode.IsChecked = $false
+        Update-FloorPage
+    })
+    $Ui.FlRouteUndo.Add_Click({ $L = @((Get-Floor).Route); if ($L.Count) { Set-FloorRoute @($L | Select-Object -First ($L.Count - 1)) } })
+    $Ui.FlRouteClear.Add_Click({ if (Show-Confirm "Очистить маршрут?" "Все точки маршрута ($(@((Get-Floor).Route).Count)) будут удалены. Прошедшие прогулки не меняются." "Очистить") { Set-FloorRoute @() } })
     $Cv.Add_MouseRightButtonUp({
         param($S, $E)
         $V = $script:FloorView
         if ([double]$V.RightMoved -gt 5) { return }   # it was a pan
+        if ($script:FloorRouteMode) {
+            $I = Find-FloorCpAt (Get-FloorPos $E); if ($I -lt 0) { return }
+            $script:FloorMenuCp = $I
+            $M = New-ContextMenu @((New-MenuItem "Удалить точку маршрута $($I + 1)" 0xE74D { $L = [System.Collections.Generic.List[object]]::new(@((Get-Floor).Route)); $L.RemoveAt($script:FloorMenuCp); Set-FloorRoute @($L) }))
+            $M.PlacementTarget = $V.Canvas; $M.IsOpen = $true; $E.Handled = $true
+            return
+        }
         $K = Find-FloorApAt (Get-FloorPos $E)
         if (-not $K) { return }
         $script:FloorPickAp = $K; $script:FloorSelAp = ""; Update-FloorPage
@@ -688,8 +785,8 @@ function Initialize-FloorPage {
     $script:Win.Add_PreviewKeyDown({
         param($S, $E)
         if (-not $Ui.PageFloor.IsVisible) { return }
-        if ($E.Key -eq "Escape" -and ($script:FloorScaleMode -or $script:FloorCropMode -or $script:FloorPickAp -or $script:FloorSelAp)) {
-            $script:FloorScaleMode = $false; $script:FloorCropMode = $false; $script:FloorPickAp = ""; $script:FloorSelAp = ""; Update-FloorPage; $E.Handled = $true
+        if ($E.Key -eq "Escape" -and ($script:FloorScaleMode -or $script:FloorCropMode -or $script:FloorPickAp -or $script:FloorSelAp -or $script:FloorRouteMode)) {
+            $script:FloorScaleMode = $false; $script:FloorCropMode = $false; $script:FloorRouteMode = $false; $script:FloorPickAp = ""; $script:FloorSelAp = ""; Update-FloorPage; $E.Handled = $true
         }
         # Delete removes the AP picked on the plan (not while typing in a text field)
         if ($E.Key -eq "Delete" -and $script:FloorPickAp -and [System.Windows.Input.Keyboard]::FocusedElement -isnot [System.Windows.Controls.TextBox]) { Remove-FloorAp $script:FloorPickAp; $E.Handled = $true }
@@ -723,6 +820,12 @@ function Initialize-FloorPage {
         param($S, $E)
         $P = Get-FloorPos $E; if (-not $P) { return }
         $F = Get-Floor
+        if ($script:FloorRouteMode) {
+            $I = Find-FloorCpAt $P
+            if ($I -ge 0) { $script:FloorDrag = @{ Kind = "cp"; I = $I; Moved = $false }; [void]$script:FloorView.Canvas.CaptureMouse(); return }
+            Set-FloorRoute (@($F.Route) + @(@{ X = [Math]::Round($P.X, 4); Y = [Math]::Round($P.Y, 4) }))
+            return
+        }
         if ($script:FloorCropMode) {
             $script:FloorDrag = @{ Kind = "crop"; X0 = $P.X; Y0 = $P.Y; Rect = New-Object System.Windows.Shapes.Rectangle }
             $R = $script:FloorDrag.Rect
@@ -771,6 +874,12 @@ function Initialize-FloorPage {
         $D = $script:FloorDrag; if (-not $D) { return }
         $P = Get-FloorPos $E; if (-not $P) { return }
         $V = $script:FloorView
+        if ($D.Kind -eq "cp") {
+            $D.Moved = $true
+            $Cp = @((Get-Floor).Route)[$D.I]; $Cp.X = [Math]::Round($P.X, 4); $Cp.Y = [Math]::Round($P.Y, 4)
+            Update-FloorView $V
+            return
+        }
         if ($D.Kind -eq "ap") {
             if (-not $D.Moved -and ([Math]::Abs(($P.X - $D.X0) * $V.W) + [Math]::Abs(($P.Y - $D.Y0) * $V.H)) -lt 4) { return }
             $D.Moved = $true
@@ -795,6 +904,7 @@ function Initialize-FloorPage {
         $D = $script:FloorDrag; if (-not $D) { return }
         $script:FloorDrag = $null
         $script:FloorView.Canvas.ReleaseMouseCapture()
+        if ($D.Kind -eq "cp") { if ($D.Moved) { Save-Wplan }; Update-FloorPage; return }
         if ($D.Kind -eq "ap") {
             if ($D.Moved) { Save-Wplan; Show-Toast "«$(Get-WplanApName $D.Key)» перемещена" }
             Update-FloorPage
