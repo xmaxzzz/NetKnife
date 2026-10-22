@@ -171,6 +171,7 @@ function Start-FloorRoomsAi {
         param($M)
         $Ui.FlRooms.IsEnabled = $true
         if (-not $M.Ok) { $Ui.FlHint.Text = "ИИ: $($M.Text)"; Show-Toast "ИИ: $($M.Text)" "fail"; return }
+        if ($M.NoImage) { $Ui.FlHint.Text = "ИИ-провайдер не принял картинку плана — обведи помещения сам (переключатель «Рисовать помещения») или выбери в Настройках → ИИ-анализ провайдер с поддержкой картинок."; return }
         $J = ConvertFrom-AiJson $M.Text
         $L = @(foreach ($R in @($J.rooms)) {
             $X = [double]$R.x; $Y = [double]$R.y; $W = [double]$R.w; $H = [double]$R.h

@@ -1,6 +1,9 @@
 # Page: app settings (startup page, window behavior, data folder).
 
 function Initialize-SettingsPage {
+    # AI provider (AI Gateway by default)
+    $Ui.SetAiStatus.Text = Get-AiStatusText
+    $Ui.SetAiSetup.Add_Click({ Show-AiKeyDialog })
     # startup page dropdown — list every page by its sidebar title
     $Items = foreach ($K in $script:Pages.get_Keys()) {
         if ($K -eq "settings") { continue }

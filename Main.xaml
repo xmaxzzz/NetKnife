@@ -1107,7 +1107,7 @@
                                         <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,8">
                                             <Button x:Name="FlLoad" Style="{StaticResource AccentBtn}" Padding="12,7" Margin="0,0,8,6"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8E5;" Style="{StaticResource Glyph}"/><TextBlock Text="Загрузить план (PNG, JPG, PDF)"/></StackPanel></Button>
                                             <Button x:Name="FlPaste" Style="{StaticResource Btn}" Padding="12,7" Margin="0,0,8,6" ToolTip="Скриншот плана (Win+Shift+S) или скопированный файл; Ctrl+V"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE77F;" Style="{StaticResource Glyph}"/><TextBlock Text="Вставить из буфера"/></StackPanel></Button>
-                                            <Button x:Name="FlRooms" Style="{StaticResource Btn}" Padding="12,7" Margin="0,0,14,6" ToolTip="Claude прочитает подписи помещений на плане и обведёт их"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE99A;" Style="{StaticResource Glyph}"/><TextBlock Text="Распознать помещения (ИИ)"/></StackPanel></Button>
+                                            <Button x:Name="FlRooms" Style="{StaticResource Btn}" Padding="12,7" Margin="0,0,14,6" ToolTip="ИИ прочитает подписи помещений на плане и обведёт их (нужен провайдер с поддержкой картинок)"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE99A;" Style="{StaticResource Glyph}"/><TextBlock Text="Распознать помещения (ИИ)"/></StackPanel></Button>
                                             <CheckBox x:Name="FlRoomMode" Style="{StaticResource Switch}" Content="Рисовать помещения" VerticalAlignment="Center" Margin="0,0,0,6"/>
                                         </WrapPanel>
                                         <TextBlock x:Name="FlHint" DockPanel.Dock="Bottom" Foreground="{StaticResource Sub}" FontSize="12" TextWrapping="Wrap" Margin="2,8,0,0"/>
@@ -1200,6 +1200,17 @@
                                     <CheckBox x:Name="SetTray" Style="{StaticResource Switch}" Content="Сворачивать в трей вместо закрытия" Margin="0,4,0,0"/>
                                     <CheckBox x:Name="SetHotKey" Style="{StaticResource Switch}" Content="Глобальный хоткей Ctrl+Alt+N (показать окно)" Margin="0,10,0,0"/>
                                     <TextBlock Text="Хоткей применится после перезапуска приложения." Foreground="{StaticResource Faint}" FontSize="11.5" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource CardBox}">
+                                <StackPanel>
+                                    <TextBlock Text="ИИ-АНАЛИЗ" Style="{StaticResource Caption}"/>
+                                    <TextBlock Text="Разбор замеров Wi-Fi, прогулок, роуминга и плана помещений. По умолчанию — наш AI Gateway (ai.butlerdc.ae, модель sonnet); можно Claude API напрямую." Foreground="{StaticResource Sub}" FontSize="12" TextWrapping="Wrap" Margin="0,2,0,8"/>
+                                    <DockPanel>
+                                        <Button x:Name="SetAiSetup" DockPanel.Dock="Right" Style="{StaticResource Btn}" Padding="12,6" Margin="10,0,0,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE99A;" Style="{StaticResource Glyph}"/><TextBlock Text="Настроить"/></StackPanel></Button>
+                                        <TextBlock x:Name="SetAiStatus" FontFamily="{StaticResource MonoFont}" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                                    </DockPanel>
                                 </StackPanel>
                             </Border>
 

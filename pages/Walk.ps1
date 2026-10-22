@@ -469,13 +469,13 @@ function Start-WalkAi {
     if (-not $script:Walk) { Show-Toast "Нет прогулки" "warn"; return }
     $Sys = "Ты инженер беспроводных сетей (TP-Link Omada, точки EAP, роутер MikroTik). Дан план объекта с отмеченными точками доступа (синие кружки), маршрутом обхода (линия), уровнем сигнала подключения по пути (зелёный ≥-60, жёлто-зелёный ≥-67, жёлтый ≥-72, оранжевый ≥-78, красный хуже; dBm ноутбука, телефон примерно на 6 dB хуже), событиями (синий — бесшовный переход, оранжевый — переход с паузой, красный — обрыв, фиолетовый — голосовая заметка инженера) и данные обхода. Разбери: где покрытие слабое и почему (стены, расстояние до точки), где клиенты «липнут» к дальней точке, где проблемы не радио (потери до шлюза при хорошем сигнале — кабель/порт/PoE). Дай конкретные действия по пунктам: мощность и канал по точкам, перенос или добавление точки (куда, на плане), настройки Omada. Учитывай голосовые заметки. По-русски, кратко, без воды."
     $Ui.WkAi.IsEnabled = $false
-    $Ui.WkResult.Text = (Get-WalkReport) + "`r`n━━━ РАЗБОР ИИ ━━━`r`nотправляю план, карту и данные обхода…"
+    $Ui.WkResult.Text = (Get-WalkReport) + "`r`n━━━ РАЗБОР ИИ ━━━`r`nотправляю план, карту и данные обхода ($((Get-AiConf).Title))…"
     $Ok = Start-AiRequest -Name "walk-ai" -System $Sys -UserText (Get-WalkAiData) -MaxTokens 3000 -ImageB64 (Get-WalkMapB64) -OnResult {
         param($M)
         $Ui.WkAi.IsEnabled = $true
         if (-not $M.Ok) { Show-Toast "ИИ: $($M.Text)" "fail"; $Ui.WkResult.Text = Get-WalkReport; return }
         $script:Walk.Ai = $M.Text
-        $Ui.WkResult.Text = (Get-WalkReport) + "`r`n━━━ РАЗБОР ИИ ━━━`r`n" + $M.Text
+        $Ui.WkResult.Text = (Get-WalkReport) + "`r`n━━━ РАЗБОР ИИ ━━━`r`n" + $(if ($M.NoImage) { "(провайдер не принял картинку карты — разбор только по данным обхода)`r`n" } else { "" }) + $M.Text
     }
     if (-not $Ok) { $Ui.WkAi.IsEnabled = $true }
 }

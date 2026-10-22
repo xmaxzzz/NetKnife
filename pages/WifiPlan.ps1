@@ -687,7 +687,7 @@ function Start-WplanAi {
     $Names = @{}; foreach ($K in $script:Wplan.Aps.Keys) { $Names[$K] = Get-WplanApName $K }
     $Data = [ordered]@{ Site = $R.Site; Series = $R.Series; Settings = $R.Opt; Rows = $R.Rows; ApNames = $Names; Bands = $Bands; Compare = $(if ($C.Error) { $null } else { $C.Bands }) } | ConvertTo-Json -Depth 10 -Compress
     $Ui.WpAi.IsEnabled = $false
-    $Ui.WpStatus.Text = "Спрашиваю Claude…"
+    $Ui.WpStatus.Text = "Спрашиваю ИИ ($((Get-AiConf).Title))…"
     $Ok = Start-AiRequest -Name "wplan-ai" -System $Sys -UserText "Данные объекта:`n$Data" -MaxTokens 3000 -OnResult {
         param($M)
         $Ui.WpAi.IsEnabled = $true
