@@ -228,6 +228,7 @@ function Remove-Floor {
     $script:Wplan.Floor = @{ Image = ""; W = 0; H = 0; Rooms = @(); Aps = @{}; V = 2 }
     $script:FloorSelAp = ""; $script:FloorScaleMode = $false
 $script:FloorCropMode = $false
+$script:FloorPickAp = ""      # AP clicked on the plan (Delete / right-click removes, drag moves)
     Save-Wplan
     if ($P) { try { Remove-Item $P -Force } catch { Write-AppLog "floor delete: $_" } }
     if ($script:FloorView) { $script:FloorView.Bmp = $null; $script:FloorView.File = "" }
@@ -391,6 +392,7 @@ function New-FloorView {
     $PanDown = {
         param($S2, $E2)
         $V = $S2.Tag
+        if ($E2.ChangedButton -eq "Right") { $V.RightAt = $E2.GetPosition($V.Box); $V.RightMoved = 0.0 }
         if ($E2.ChangedButton -notin @("Right", "Middle") -or $V.Zoom.ScaleX -le 1.0001) { return }
         $V.Pan = @{ P = $E2.GetPosition($V.Box); X = $V.Shift.X; Y = $V.Shift.Y }
         [void]$V.Canvas.CaptureMouse(); $V.Canvas.Cursor = [System.Windows.Input.Cursors]::SizeAll
@@ -401,6 +403,7 @@ function New-FloorView {
         param($S2, $E2)
         $V = $S2.Tag; if (-not $V.Pan) { return }
         $Q = $E2.GetPosition($V.Box); $K = Get-FloorBoxScale $V
+        $V.RightMoved = [Math]::Max([double]$V.RightMoved, [Math]::Abs($Q.X - $V.Pan.P.X) + [Math]::Abs($Q.Y - $V.Pan.P.Y))
         $V.Shift.X = $V.Pan.X + ($Q.X - $V.Pan.P.X) / $K; $V.Shift.Y = $V.Pan.Y + ($Q.Y - $V.Pan.P.Y) / $K
         Limit-FloorShift $V
     })
@@ -562,6 +565,32 @@ function Update-FloorView {
 
 # ---------------------------------------------------------------- page (wizard step «План»)
 
+# AP marker under a plan point (fractions), nearest within the marker radius
+function Find-FloorApAt {
+    param($P)
+    $F = Get-Floor; $V = $script:FloorView
+    if (-not $F -or -not $V.W -or -not $P) { return "" }
+    $R = 26 * $V.W / 1000
+    $Best = ""; $Bd = [double]::MaxValue
+    foreach ($K in @($F.Aps.Keys)) {
+        $A = $F.Aps[$K]
+        $D = [Math]::Sqrt([Math]::Pow(([double]$A.X - $P.X) * $V.W, 2) + [Math]::Pow(([double]$A.Y - $P.Y) * $V.H, 2))
+        if ($D -le $R -and $D -lt $Bd) { $Best = $K; $Bd = $D }
+    }
+    return $Best
+}
+
+function Remove-FloorAp {
+    param([string]$Key)
+    $F = Get-Floor
+    if (-not $Key -or -not $F.Aps.ContainsKey($Key)) { return }
+    [void]$F.Aps.Remove($Key)
+    if ($script:FloorPickAp -eq $Key) { $script:FloorPickAp = "" }
+    if ($script:FloorSelAp -eq $Key) { $script:FloorSelAp = "" }
+    Save-Wplan; Update-FloorPage
+    Show-Toast "«$(Get-WplanApName $Key)» убрана с плана — выбери её в списке справа, чтобы поставить заново"
+}
+
 $script:FloorSelAp = ""
 $script:FloorDrag = $null
 $script:FloorScaleMode = $false
@@ -569,7 +598,7 @@ $script:FloorScaleMode = $false
 function Update-FloorPage {
     if (-not $script:FloorView) { return }
     $F = Get-Floor
-    Update-FloorView $script:FloorView -SelAp $script:FloorSelAp
+    Update-FloorView $script:FloorView -SelAp $(if ($script:FloorSelAp) { $script:FloorSelAp } else { $script:FloorPickAp })
     $W = $(if ($script:Wplan) { Get-WhState } else { @{} })
     # AP list: planner APs ∪ the router's DHCP list
     $Keys = [ordered]@{}
@@ -599,6 +628,7 @@ function Update-FloorPage {
     if (-not (Get-FloorImagePath)) { $Ui.FlHint.Text = "Загрузи план: картинка или PDF (кнопка) или скриншот (Win+Shift+S → «Вставить», Ctrl+V)." }
     elseif ($script:FloorCropMode) { $Ui.FlHint.Text = "Обрезка: обведи мышью ту часть плана, что нужна (зажми и тяни). Esc — отмена." }
     elseif ($script:FloorScaleMode) { $Ui.FlHint.Text = "Масштаб: проведи линию по размерной линии плана (зажми и тяни; Shift — строго по горизонтали/вертикали) и впиши её длину. Esc — отмена." }
+    elseif ($script:FloorPickAp) { $Ui.FlHint.Text = "«$(Get-WplanApName $script:FloorPickAp)»: перетащи мышью — переместить; Delete или правый клик — убрать с плана." }
     elseif ($script:FloorSelAp) { $Ui.FlHint.Text = "Кликни на плане, где висит «$(Get-WplanApName $script:FloorSelAp)». Esc — отмена." }
     elseif ($Ui.FlRoomMode.IsChecked) { $Ui.FlHint.Text = "Обведи помещение мышью (зажми и тяни), затем впиши название." }
     elseif (-not @($F.Rooms).Count) { $Ui.FlHint.Text = "Помещения: «Распознать помещения» (ИИ прочитает план) или нарисуй сам. Точки: выбери справа и кликни на плане." }
@@ -636,18 +666,46 @@ function Initialize-FloorPage {
         Update-FloorPage
     })
     $Ui.FlUncrop.Add_Click({ Undo-FloorCrop })
-    $script:Win.Add_PreviewKeyDown({ param($S, $E) if ($E.Key -eq "Escape" -and ($script:FloorScaleMode -or $script:FloorCropMode)) { $script:FloorScaleMode = $false; $script:FloorCropMode = $false; Update-FloorPage } })
+    $Cv.Add_MouseRightButtonUp({
+        param($S, $E)
+        $V = $script:FloorView
+        if ([double]$V.RightMoved -gt 5) { return }   # it was a pan
+        $K = Find-FloorApAt (Get-FloorPos $E)
+        if (-not $K) { return }
+        $script:FloorPickAp = $K; $script:FloorSelAp = ""; Update-FloorPage
+        $script:FloorMenuAp = $K
+        $M = New-ContextMenu @(
+            (New-MenuItem "Убрать «$(Get-WplanApName $K)» с плана" 0xE74D { Remove-FloorAp $script:FloorMenuAp } "Delete"),
+            (New-MenuItem "Переместить — перетащи мышью" 0xE7C2 { })
+        )
+        $M.PlacementTarget = $V.Canvas; $M.IsOpen = $true
+        $E.Handled = $true
+    })
+    $Ui.FlAps.ContextMenu = New-ContextMenu @(
+        (New-MenuItem "Поставить / переставить на плане" 0xE707 { $S = $Ui.FlAps.SelectedItem; if ($S) { $script:FloorSelAp = $S.Key; $script:FloorPickAp = ""; Update-FloorPage } } "клик"),
+        (New-MenuItem "Убрать с плана" 0xE74D { $S = $Ui.FlAps.SelectedItem; if ($S) { Remove-FloorAp $S.Key } } "Delete")
+    )
+    $script:Win.Add_PreviewKeyDown({
+        param($S, $E)
+        if (-not $Ui.PageFloor.IsVisible) { return }
+        if ($E.Key -eq "Escape" -and ($script:FloorScaleMode -or $script:FloorCropMode -or $script:FloorPickAp -or $script:FloorSelAp)) {
+            $script:FloorScaleMode = $false; $script:FloorCropMode = $false; $script:FloorPickAp = ""; $script:FloorSelAp = ""; Update-FloorPage; $E.Handled = $true
+        }
+        # Delete removes the AP picked on the plan (not while typing in a text field)
+        if ($E.Key -eq "Delete" -and $script:FloorPickAp -and [System.Windows.Input.Keyboard]::FocusedElement -isnot [System.Windows.Controls.TextBox]) { Remove-FloorAp $script:FloorPickAp; $E.Handled = $true }
+    })
     $Ui.FlRoomMode.Add_Click({ $script:FloorSelAp = ""; Update-FloorPage })
     $Ui.FlAps.Add_SelectionChanged({
         if ($script:FloorListSync) { return }
         $S = $Ui.FlAps.SelectedItem
         $script:FloorSelAp = $(if ($S) { $S.Key } else { "" })
+        $script:FloorPickAp = ""
         if ($script:FloorSelAp) { $Ui.FlRoomMode.IsChecked = $false; $script:FloorScaleMode = $false }
         Update-FloorPage
     })
     $Ui.FlAps.Add_KeyDown({
         param($S, $E)
-        if ($E.Key -eq "Delete" -and $Ui.FlAps.SelectedItem) { $F = Get-Floor; [void]$F.Aps.Remove($Ui.FlAps.SelectedItem.Key); $script:FloorSelAp = ""; Save-Wplan; Update-FloorPage }
+        if ($E.Key -eq "Delete" -and $Ui.FlAps.SelectedItem) { Remove-FloorAp $Ui.FlAps.SelectedItem.Key; $E.Handled = $true }
         if ($E.Key -eq "Escape") { $script:FloorSelAp = ""; Update-FloorPage }
     })
     $Ui.FlRoomList.Add_KeyDown({
@@ -683,6 +741,15 @@ function Initialize-FloorPage {
             [void]$script:FloorView.Canvas.CaptureMouse()
             return
         }
+        $Hit = $(if (-not $Ui.FlRoomMode.IsChecked) { Find-FloorApAt $P } else { "" })
+        if ($Hit) {
+            $script:FloorDrag = @{ Kind = "ap"; Key = $Hit; Moved = $false; X0 = $P.X; Y0 = $P.Y }
+            $script:FloorPickAp = $Hit; $script:FloorSelAp = ""
+            [void]$script:FloorView.Canvas.CaptureMouse()
+            Update-FloorPage
+            return
+        }
+        if ($script:FloorPickAp -and -not $script:FloorSelAp) { $script:FloorPickAp = ""; Update-FloorPage; return }
         if ($script:FloorSelAp) {
             $F.Aps[$script:FloorSelAp] = @{ X = [Math]::Round($P.X, 4); Y = [Math]::Round($P.Y, 4) }
             # next unplaced AP is selected automatically — place them one after another
@@ -704,6 +771,13 @@ function Initialize-FloorPage {
         $D = $script:FloorDrag; if (-not $D) { return }
         $P = Get-FloorPos $E; if (-not $P) { return }
         $V = $script:FloorView
+        if ($D.Kind -eq "ap") {
+            if (-not $D.Moved -and ([Math]::Abs(($P.X - $D.X0) * $V.W) + [Math]::Abs(($P.Y - $D.Y0) * $V.H)) -lt 4) { return }
+            $D.Moved = $true
+            (Get-Floor).Aps[$D.Key] = @{ X = [Math]::Round($P.X, 4); Y = [Math]::Round($P.Y, 4) }
+            Update-FloorView $V -SelAp $D.Key
+            return
+        }
         if ($D.Kind -eq "scale") {
             # Shift: strictly horizontal / vertical (dimension lines are)
             if ([System.Windows.Input.Keyboard]::Modifiers -band [System.Windows.Input.ModifierKeys]::Shift) {
@@ -721,6 +795,11 @@ function Initialize-FloorPage {
         $D = $script:FloorDrag; if (-not $D) { return }
         $script:FloorDrag = $null
         $script:FloorView.Canvas.ReleaseMouseCapture()
+        if ($D.Kind -eq "ap") {
+            if ($D.Moved) { Save-Wplan; Show-Toast "«$(Get-WplanApName $D.Key)» перемещена" }
+            Update-FloorPage
+            return
+        }
         if ($D.Kind -eq "scale") {
             $V = $script:FloorView
             $Px = [Math]::Sqrt([Math]::Pow(($D.X1 - $D.X0) * $V.W, 2) + [Math]::Pow(($D.Y1 - $D.Y0) * $V.H, 2))
