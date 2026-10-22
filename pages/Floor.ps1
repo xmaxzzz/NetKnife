@@ -100,11 +100,8 @@ function Save-FloorBitmap {
     if (-not $F) { Show-Toast "Сначала выбери объект (шаг 1)" "warn"; return }
     $Max = [Math]::Max($Bmp.PixelWidth, $Bmp.PixelHeight)
     if ($Max -gt 3000) { $K = 3000.0 / $Max; $Bmp = New-Object System.Windows.Media.Imaging.TransformedBitmap($Bmp, (New-Object System.Windows.Media.ScaleTransform($K, $K))) }
-    if (-not (Test-Path $script:WplanDir)) { New-Item -ItemType Directory -Path $script:WplanDir | Out-Null }
-    $Name = (Split-Path (Get-WplanPath $script:Wplan.Site "floor.png") -Leaf)
-    $Enc = New-Object System.Windows.Media.Imaging.PngBitmapEncoder
-    $Enc.Frames.Add([System.Windows.Media.Imaging.BitmapFrame]::Create($Bmp))
-    $Fs = [IO.File]::Create((Join-Path $script:WplanDir $Name)); $Enc.Save($Fs); $Fs.Dispose()
+    $Name = Write-FloorPng $Bmp "floor.png"
+    Remove-FloorOriginal
     $Keep = ($F.W -and [Math]::Abs($F.W / [Math]::Max(1, $F.H) - $Bmp.PixelWidth / [double]$Bmp.PixelHeight) -lt 0.02)
     $F.Image = $Name; $F.W = $Bmp.PixelWidth; $F.H = $Bmp.PixelHeight
     if (-not $Keep -and (@($F.Rooms).Count -or $F.Aps.Count)) {
@@ -115,10 +112,109 @@ function Save-FloorBitmap {
     Show-Toast $(if ($Keep -and (@($F.Rooms).Count -or $F.Aps.Count)) { "План заменён: $($F.W)×$($F.H), помещения и точки остались на местах" } else { "План загружен: $($F.W)×$($F.H)" })
 }
 
+function Write-FloorPng {
+    param($Bmp, [string]$Ext)
+    if (-not (Test-Path $script:WplanDir)) { New-Item -ItemType Directory -Path $script:WplanDir | Out-Null }
+    $Name = (Split-Path (Get-WplanPath $script:Wplan.Site $Ext) -Leaf)
+    $Enc = New-Object System.Windows.Media.Imaging.PngBitmapEncoder
+    $Enc.Frames.Add([System.Windows.Media.Imaging.BitmapFrame]::Create($Bmp))
+    $Fs = [IO.File]::Create((Join-Path $script:WplanDir $Name)); $Enc.Save($Fs); $Fs.Dispose()
+    return $Name
+}
+
+function Remove-FloorOriginal {
+    $F = Get-Floor
+    if ($F.Orig) { $P = Join-Path $script:WplanDir $F.Orig; if (Test-Path $P) { Remove-Item $P -Force -ErrorAction SilentlyContinue } }
+    $F.Orig = ""; $F.Crop = $null
+}
+
+# ---------------------------------------------------------------- crop
+# The uncropped picture is kept as <site>.floor-orig.png; Floor.Crop = @{ X; Y; W; H } — the current picture as a
+# fraction of the original. Rooms, APs, scale and walk clicks are re-mapped so nothing moves on the plan.
+
+function Convert-FloorFrame {
+    param($Pt, $Fr, [switch]$Back)   # Fr = sub-rectangle (fractions) of the outer frame
+    if (-not $Pt) { return }
+    if ($Back) { $Pt.X = $Fr.X + [double]$Pt.X * $Fr.W; $Pt.Y = $Fr.Y + [double]$Pt.Y * $Fr.H }
+    else { $Pt.X = ([double]$Pt.X - $Fr.X) / $Fr.W; $Pt.Y = ([double]$Pt.Y - $Fr.Y) / $Fr.H }
+    $Pt.X = [Math]::Round([double]$Pt.X, 5); $Pt.Y = [Math]::Round([double]$Pt.Y, 5)
+}
+
+# moves everything placed on the plan into the new frame (or back out of it)
+function Move-FloorItems {
+    param($Fr, [switch]$Back)
+    $F = Get-Floor
+    foreach ($R in @($F.Rooms)) {
+        $P2 = @{ X = $R.X + $R.W; Y = $R.Y + $R.H }
+        Convert-FloorFrame $R $Fr -Back:$Back; Convert-FloorFrame $P2 $Fr -Back:$Back
+        $R.W = [Math]::Round($P2.X - $R.X, 5); $R.H = [Math]::Round($P2.Y - $R.Y, 5)
+    }
+    foreach ($K in @($F.Aps.Keys)) { Convert-FloorFrame $F.Aps[$K] $Fr -Back:$Back }
+    if ($F.Scale) {
+        $A = @{ X = $F.Scale.X1; Y = $F.Scale.Y1 }; $B = @{ X = $F.Scale.X2; Y = $F.Scale.Y2 }
+        Convert-FloorFrame $A $Fr -Back:$Back; Convert-FloorFrame $B $Fr -Back:$Back
+        $F.Scale.X1 = $A.X; $F.Scale.Y1 = $A.Y; $F.Scale.X2 = $B.X; $F.Scale.Y2 = $B.Y
+    }
+    # walks of this site keep their clicks on the same spot of the plan
+    foreach ($Wf in @(Get-ChildItem $script:WplanDir -Filter ((Split-Path (Get-WplanPath $script:Wplan.Site "walk-") -Leaf) + "*.json") -ErrorAction SilentlyContinue)) {
+        try {
+            $J = Get-Content $Wf.FullName -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable
+            foreach ($C in @($J.Clicks)) { Convert-FloorFrame $C $Fr -Back:$Back }
+            $J | ConvertTo-Json -Depth 8 -Compress | Set-Content -Path $Wf.FullName -Encoding UTF8
+        } catch { Write-AppLog "crop walk $($Wf.Name): $_" }
+    }
+    if ($script:Walk -and -not $script:Walk.Running) { foreach ($C in @($script:Walk.Clicks)) { Convert-FloorFrame $C $Fr -Back:$Back } }
+}
+
+function Invoke-FloorCrop {
+    param([double]$X0, [double]$Y0, [double]$X1, [double]$Y1)
+    $F = Get-Floor; $P = Get-FloorImagePath
+    if (-not $P) { return }
+    $Fr = @{ X = [Math]::Min($X0, $X1); Y = [Math]::Min($Y0, $Y1); W = [Math]::Abs($X1 - $X0); H = [Math]::Abs($Y1 - $Y0) }
+    $Bmp = Read-FloorBitmapFile $P
+    $Rc = New-Object System.Windows.Int32Rect ([int]($Fr.X * $Bmp.PixelWidth)), ([int]($Fr.Y * $Bmp.PixelHeight)), ([int]($Fr.W * $Bmp.PixelWidth)), ([int]($Fr.H * $Bmp.PixelHeight))
+    if ($Rc.Width -lt 50 -or $Rc.Height -lt 50) { Show-Toast "Слишком маленькая рамка" "warn"; return }
+    # exact pixel frame (rounding) for the re-mapping
+    $Fr = @{ X = $Rc.X / [double]$Bmp.PixelWidth; Y = $Rc.Y / [double]$Bmp.PixelHeight; W = $Rc.Width / [double]$Bmp.PixelWidth; H = $Rc.Height / [double]$Bmp.PixelHeight }
+    $Cut = New-Object System.Windows.Media.Imaging.CroppedBitmap($Bmp, $Rc)
+    if (-not $F.Orig) {
+        $F.Orig = (Split-Path (Get-WplanPath $script:Wplan.Site "floor-orig.png") -Leaf)
+        Copy-Item $P (Join-Path $script:WplanDir $F.Orig) -Force
+        $F.Crop = @{ X = 0.0; Y = 0.0; W = 1.0; H = 1.0 }
+    }
+    [void](Write-FloorPng $Cut "floor.png")
+    Move-FloorItems $Fr
+    # the crop of the original = old crop ∘ new frame
+    $C = $F.Crop
+    $F.Crop = @{ X = $C.X + $Fr.X * $C.W; Y = $C.Y + $Fr.Y * $C.H; W = $Fr.W * $C.W; H = $Fr.H * $C.H }
+    $F.W = $Cut.PixelWidth; $F.H = $Cut.PixelHeight
+    Save-Wplan
+    Reset-FloorZoom $script:FloorView; Reset-FloorZoom $script:WalkView
+    Update-FloorPage
+    Show-Toast "План обрезан: $($F.W)×$($F.H). Вернуть целиком — «Без обрезки»"
+}
+
+function Undo-FloorCrop {
+    $F = Get-Floor
+    if (-not $F.Orig -or -not $F.Crop) { return }
+    $O = Join-Path $script:WplanDir $F.Orig
+    if (-not (Test-Path $O)) { Show-Toast "Исходник плана не найден" "fail"; $F.Orig = ""; $F.Crop = $null; Save-Wplan; Update-FloorPage; return }
+    Move-FloorItems $F.Crop -Back
+    Copy-Item $O (Get-FloorImagePath) -Force
+    $Bmp = Read-FloorBitmapFile $O
+    $F.W = $Bmp.PixelWidth; $F.H = $Bmp.PixelHeight
+    Remove-Item $O -Force -ErrorAction SilentlyContinue
+    $F.Orig = ""; $F.Crop = $null
+    Save-Wplan
+    Reset-FloorZoom $script:FloorView; Reset-FloorZoom $script:WalkView
+    Update-FloorPage
+    Show-Toast "План снова целиком"
+}
+
 function Read-FloorBitmapFile {
     param([string]$Path)
     $B = New-Object System.Windows.Media.Imaging.BitmapImage
-    $B.BeginInit(); $B.CacheOption = "OnLoad"; $B.UriSource = [Uri]$Path; $B.EndInit(); $B.Freeze()
+    $B.BeginInit(); $B.CacheOption = "OnLoad"; $B.CreateOptions = "IgnoreImageCache"; $B.UriSource = [Uri]$Path; $B.EndInit(); $B.Freeze()   # the file changes (replace, crop) — WPF would serve the cached old picture
     return $B
 }
 
@@ -128,8 +224,10 @@ function Remove-Floor {
     $Msg = "Удалится картинка плана$(if (@($F.Rooms).Count) { ", помещения ($(@($F.Rooms).Count))" })$(if ($F.Aps.Count) { ", расстановка точек ($($F.Aps.Count))" })$(if ($F.Scale) { ", масштаб" }). Прогулки, замеры и расчёт останутся. Новый план — кнопкой «Загрузить план»."
     if (-not (Show-Confirm "Удалить план?" $Msg "Удалить" -Danger)) { return }
     $P = Get-FloorImagePath
+    Remove-FloorOriginal
     $script:Wplan.Floor = @{ Image = ""; W = 0; H = 0; Rooms = @(); Aps = @{}; V = 2 }
     $script:FloorSelAp = ""; $script:FloorScaleMode = $false
+$script:FloorCropMode = $false
     Save-Wplan
     if ($P) { try { Remove-Item $P -Force } catch { Write-AppLog "floor delete: $_" } }
     if ($script:FloorView) { $script:FloorView.Bmp = $null; $script:FloorView.File = "" }
@@ -262,12 +360,57 @@ function New-FloorView {
     param([string]$Kind)
     $Cv = New-Object System.Windows.Controls.Canvas
     $Cv.Background = [System.Windows.Media.Brushes]::Transparent
-    $Cv.Tag = @{ Kind = $Kind }
     $Vb = New-Object System.Windows.Controls.Viewbox
     $Vb.Stretch = "Uniform"; $Vb.Child = $Cv
     $Ph = New-Object System.Windows.Controls.TextBlock
     $Ph.Text = "План не загружен"; $Ph.Foreground = Get-Brush "Faint"; $Ph.HorizontalAlignment = "Center"; $Ph.VerticalAlignment = "Center"; $Ph.FontSize = 14; $Ph.TextWrapping = "Wrap"; $Ph.TextAlignment = "Center"
-    return @{ Kind = $Kind; Box = $Vb; Canvas = $Cv; Placeholder = $Ph; W = 0; H = 0; File = ""; Bmp = $null }
+    # zoom = RenderTransform of the canvas (inside the fit-to-box Viewbox); GetPosition(canvas) stays in plan pixels
+    $Sc = New-Object System.Windows.Media.ScaleTransform 1, 1
+    $Tr = New-Object System.Windows.Media.TranslateTransform 0, 0
+    $Tg = New-Object System.Windows.Media.TransformGroup; $Tg.Children.Add($Sc); $Tg.Children.Add($Tr)
+    $Cv.RenderTransform = $Tg
+    $Tools = New-Object System.Windows.Controls.StackPanel
+    $Tools.Orientation = "Horizontal"; $Tools.HorizontalAlignment = "Right"; $Tools.VerticalAlignment = "Bottom"; $Tools.Margin = New-Object System.Windows.Thickness 0, 0, 6, 6
+    $View = @{ Kind = $Kind; Box = $Vb; Canvas = $Cv; Placeholder = $Ph; Tools = $Tools; Zoom = $Sc; Shift = $Tr; W = 0; H = 0; File = ""; Bmp = $null; Pan = $null }
+    foreach ($Bt in @(@{ G = 0xE710; T = "Крупнее (колесо мыши)"; F = 1.4; Id = "ZoomIn" }, @{ G = 0xE738; T = "Мельче"; F = 1 / 1.4; Id = "ZoomOut" }, @{ G = 0xE9A6; T = "Вписать целиком"; F = 0; Id = "ZoomFit" })) {
+        $B = New-Object System.Windows.Controls.Button
+        [System.Windows.Automation.AutomationProperties]::SetAutomationId($B, "$Kind$($Bt.Id)")
+        $B.Style = $script:Win.FindResource("Btn"); $B.Padding = New-Object System.Windows.Thickness 8, 5, 8, 5; $B.Margin = New-Object System.Windows.Thickness 4, 0, 0, 0
+        $G = New-Object System.Windows.Controls.TextBlock; $G.Text = [string][char]$Bt.G; $G.FontFamily = $script:Win.FindResource("IconFont"); $G.FontSize = 13
+        $B.Content = $G; $B.ToolTip = $Bt.T; $B.Tag = @{ View = $View; F = $Bt.F }
+        $B.Add_Click({ param($S2, $E2) $X = $S2.Tag; if ($X.F) { Set-FloorZoom $X.View $X.F $null } else { Reset-FloorZoom $X.View } })
+        [void]$Tools.Children.Add($B)
+    }
+    $Cv.Tag = $View
+    $Cv.Add_MouseWheel({
+        param($S2, $E2)
+        $V = $S2.Tag; if (-not $V.W) { return }
+        Set-FloorZoom $V $(if ($E2.Delta -gt 0) { 1.2 } else { 1 / 1.2 }) $E2.GetPosition($V.Canvas)
+        $E2.Handled = $true
+    })
+    $PanDown = {
+        param($S2, $E2)
+        $V = $S2.Tag
+        if ($E2.ChangedButton -notin @("Right", "Middle") -or $V.Zoom.ScaleX -le 1.0001) { return }
+        $V.Pan = @{ P = $E2.GetPosition($V.Box); X = $V.Shift.X; Y = $V.Shift.Y }
+        [void]$V.Canvas.CaptureMouse(); $V.Canvas.Cursor = [System.Windows.Input.Cursors]::SizeAll
+        $E2.Handled = $true
+    }
+    $Cv.Add_MouseDown($PanDown)
+    $Cv.Add_MouseMove({
+        param($S2, $E2)
+        $V = $S2.Tag; if (-not $V.Pan) { return }
+        $Q = $E2.GetPosition($V.Box); $K = Get-FloorBoxScale $V
+        $V.Shift.X = $V.Pan.X + ($Q.X - $V.Pan.P.X) / $K; $V.Shift.Y = $V.Pan.Y + ($Q.Y - $V.Pan.P.Y) / $K
+        Limit-FloorShift $V
+    })
+    $Cv.Add_MouseUp({
+        param($S2, $E2)
+        $V = $S2.Tag; if (-not $V.Pan -or $E2.ChangedButton -notin @("Right", "Middle")) { return }
+        $V.Pan = $null; $V.Canvas.ReleaseMouseCapture(); $V.Canvas.Cursor = $null
+        $E2.Handled = $true
+    })
+    return $View
 }
 
 function Set-FloorViewHost {
@@ -275,6 +418,41 @@ function Set-FloorViewHost {
     $HostGrid.Children.Clear()
     [void]$HostGrid.Children.Add($View.Placeholder)
     [void]$HostGrid.Children.Add($View.Box)
+    [void]$HostGrid.Children.Add($View.Tools)
+}
+
+# Viewbox fit factor (plan pixels → screen units)
+function Get-FloorBoxScale {
+    param($V)
+    if (-not $V.W -or -not $V.Box.ActualWidth) { return 1.0 }
+    return [Math]::Min($V.Box.ActualWidth / $V.W, $V.Box.ActualHeight / $V.H)
+}
+
+# keep the zoomed plan covering the view (no flying off into emptiness)
+function Limit-FloorShift {
+    param($V)
+    $S = $V.Zoom.ScaleX
+    $V.Shift.X = [Math]::Min(0.0, [Math]::Max($V.W * (1.0 - $S), $V.Shift.X))
+    $V.Shift.Y = [Math]::Min(0.0, [Math]::Max($V.H * (1.0 - $S), $V.Shift.Y))
+}
+
+# zoom by $Factor keeping plan point $At (plan pixels; default — centre of what is visible) under the cursor
+function Set-FloorZoom {
+    param($V, [double]$Factor, $At)
+    if (-not $V -or -not $V.W) { return }
+    $S = $V.Zoom.ScaleX
+    $N = [Math]::Max(1.0, [Math]::Min(12.0, $S * $Factor))
+    if (-not $At) { $At = New-Object System.Windows.Point ((($V.W / 2) - $V.Shift.X) / $S), ((($V.H / 2) - $V.Shift.Y) / $S) }
+    $Qx = $S * $At.X + $V.Shift.X; $Qy = $S * $At.Y + $V.Shift.Y
+    $V.Zoom.ScaleX = $N; $V.Zoom.ScaleY = $N
+    $V.Shift.X = $Qx - $N * $At.X; $V.Shift.Y = $Qy - $N * $At.Y
+    Limit-FloorShift $V
+}
+
+function Reset-FloorZoom {
+    param($V)
+    if (-not $V) { return }
+    $V.Zoom.ScaleX = 1.0; $V.Zoom.ScaleY = 1.0; $V.Shift.X = 0.0; $V.Shift.Y = 0.0
 }
 
 function Add-FloorText {
@@ -314,9 +492,10 @@ function Update-FloorView {
     $P = Get-FloorImagePath
     $F = Get-Floor
     $Cv.Children.Clear()
-    if (-not $P) { $View.Box.Visibility = "Collapsed"; $View.Placeholder.Visibility = "Visible"; return }
-    $View.Box.Visibility = "Visible"; $View.Placeholder.Visibility = "Collapsed"
+    if (-not $P) { $View.Box.Visibility = "Collapsed"; $View.Tools.Visibility = "Collapsed"; $View.Placeholder.Visibility = "Visible"; return }
+    $View.Box.Visibility = "Visible"; $View.Tools.Visibility = "Visible"; $View.Placeholder.Visibility = "Collapsed"
     if ($View.File -ne $P -or -not $View.Bmp -or $View.Stamp -ne (Get-Item $P).LastWriteTimeUtc) {
+        if ($View.File -ne $P) { Reset-FloorZoom $View }
         $View.Bmp = Read-FloorBitmapFile $P; $View.File = $P; $View.Stamp = (Get-Item $P).LastWriteTimeUtc
     }
     $W = [double]$View.Bmp.PixelWidth; $H = [double]$View.Bmp.PixelHeight
@@ -412,16 +591,19 @@ function Update-FloorPage {
     $Ui.FlDelete.Visibility = $(if ($Has) { "Visible" } else { "Collapsed" })
     $Kpx = Get-FloorMPerPx
     $Ui.FlScaleText.Text = $(if ($Kpx) { "Масштаб ✔" } else { "Масштаб" })
+    $Ui.FlCrop.Visibility = $(if ($Has) { "Visible" } else { "Collapsed" })
+    $Ui.FlUncrop.Visibility = $(if ($Has -and $F.Crop) { "Visible" } else { "Collapsed" })
     $ScTxt = $(if (-not $Has) { "" } elseif ($Kpx) { " Масштаб: план ≈ {0:N1}×{1:N1} м." -f ($F.W * $Kpx), ($F.H * $Kpx) } else { " Масштаб не задан — кнопка «Масштаб» (расстояния и затухание стен в метрах и dB)." })
     $NPl = $(if ($F) { $F.Aps.Count } else { 0 })
     $Ui.FlCount.Text = "на плане $NPl из $($Items.Count)"
     if (-not (Get-FloorImagePath)) { $Ui.FlHint.Text = "Загрузи план: картинка или PDF (кнопка) или скриншот (Win+Shift+S → «Вставить», Ctrl+V)." }
+    elseif ($script:FloorCropMode) { $Ui.FlHint.Text = "Обрезка: обведи мышью ту часть плана, что нужна (зажми и тяни). Esc — отмена." }
     elseif ($script:FloorScaleMode) { $Ui.FlHint.Text = "Масштаб: проведи линию по размерной линии плана (зажми и тяни; Shift — строго по горизонтали/вертикали) и впиши её длину. Esc — отмена." }
     elseif ($script:FloorSelAp) { $Ui.FlHint.Text = "Кликни на плане, где висит «$(Get-WplanApName $script:FloorSelAp)». Esc — отмена." }
     elseif ($Ui.FlRoomMode.IsChecked) { $Ui.FlHint.Text = "Обведи помещение мышью (зажми и тяни), затем впиши название." }
     elseif (-not @($F.Rooms).Count) { $Ui.FlHint.Text = "Помещения: «Распознать помещения» (ИИ прочитает план) или нарисуй сам. Точки: выбери справа и кликни на плане." }
     else { $Ui.FlHint.Text = "Выбери точку справа и кликни на плане, где она висит. Помещений: $(@($F.Rooms).Count)." }
-    if ($ScTxt -and -not $script:FloorScaleMode) { $Ui.FlHint.Text += $ScTxt }
+    if ($ScTxt -and -not $script:FloorScaleMode -and -not $script:FloorCropMode) { $Ui.FlHint.Text += $ScTxt + " Колесо мыши — зум, правая кнопка — двигать." }
     Update-WhStepper
 }
 
@@ -447,7 +629,14 @@ function Initialize-FloorPage {
         $script:FloorSelAp = ""; $Ui.FlRoomMode.IsChecked = $false
         Update-FloorPage
     })
-    $script:Win.Add_PreviewKeyDown({ param($S, $E) if ($E.Key -eq "Escape" -and $script:FloorScaleMode) { $script:FloorScaleMode = $false; Update-FloorPage } })
+    $Ui.FlCrop.Add_Click({
+        $script:FloorCropMode = -not $script:FloorCropMode
+        $script:FloorScaleMode = $false; $script:FloorSelAp = ""; $Ui.FlRoomMode.IsChecked = $false
+        Reset-FloorZoom $script:FloorView
+        Update-FloorPage
+    })
+    $Ui.FlUncrop.Add_Click({ Undo-FloorCrop })
+    $script:Win.Add_PreviewKeyDown({ param($S, $E) if ($E.Key -eq "Escape" -and ($script:FloorScaleMode -or $script:FloorCropMode)) { $script:FloorScaleMode = $false; $script:FloorCropMode = $false; Update-FloorPage } })
     $Ui.FlRoomMode.Add_Click({ $script:FloorSelAp = ""; Update-FloorPage })
     $Ui.FlAps.Add_SelectionChanged({
         if ($script:FloorListSync) { return }
@@ -476,6 +665,15 @@ function Initialize-FloorPage {
         param($S, $E)
         $P = Get-FloorPos $E; if (-not $P) { return }
         $F = Get-Floor
+        if ($script:FloorCropMode) {
+            $script:FloorDrag = @{ Kind = "crop"; X0 = $P.X; Y0 = $P.Y; Rect = New-Object System.Windows.Shapes.Rectangle }
+            $R = $script:FloorDrag.Rect
+            $R.Stroke = ConvertTo-Brush "#EF4444"; $R.StrokeThickness = 4 * $script:FloorView.W / 1000; $R.Fill = ConvertTo-Brush "#14EF4444"
+            $R.StrokeDashArray = New-Object System.Windows.Media.DoubleCollection (, [double[]]@(4, 2))
+            [void]$script:FloorView.Canvas.Children.Add($R)
+            [void]$script:FloorView.Canvas.CaptureMouse()
+            return
+        }
         if ($script:FloorScaleMode) {
             $L = New-Object System.Windows.Shapes.Line
             $L.X1 = $P.X * $script:FloorView.W; $L.Y1 = $P.Y * $script:FloorView.H; $L.X2 = $L.X1; $L.Y2 = $L.Y1
@@ -544,6 +742,11 @@ function Initialize-FloorPage {
         }
         $P = Get-FloorPos $E
         if (-not $P -or [Math]::Abs($P.X - $D.X0) -lt 0.01 -or [Math]::Abs($P.Y - $D.Y0) -lt 0.01) { Update-FloorPage; return }
+        if ($D.Kind -eq "crop") {
+            $script:FloorCropMode = $false
+            if (Show-Confirm "Обрезать план?" "Останется только выделенная часть — она станет крупнее. Помещения, точки и масштаб останутся на своих местах; то, что окажется за рамкой, будет за краем плана. Исходник сохраняется — «Без обрезки» вернёт целиком." "Обрезать") { Invoke-FloorCrop $D.X0 $D.Y0 $P.X $P.Y } else { Update-FloorPage }
+            return
+        }
         $N = Show-FloorInput "Новое помещение" "Название — так его нужно будет называть на прогулке." ""
         if ($N) {
             $F = Get-Floor
