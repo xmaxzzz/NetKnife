@@ -11,6 +11,9 @@ function Get-Floor {
     $F = $script:Wplan.Floor
     if (-not $F.Rooms) { $F.Rooms = @() }
     if (-not $F.Aps) { $F.Aps = @{} }
+    # a missing list is $null, and @($null) has one element — keep it a real (possibly empty) array
+    if ($null -eq $F.Route) { $F.Route = @() } else { $F.Route = @($F.Route | Where-Object { $_ }) }
+    $F.Rooms = @($F.Rooms | Where-Object { $_ })
     # v2026.10.15.22 stored every click as 0 or 1 ([Math]::Min(1, x) picked the Int32 overload): such AP
     # positions are dropped once, so the APs show as not placed and get placed again
     if (-not $F.V) {
@@ -154,9 +157,9 @@ function Move-FloorItems {
     param($Fr, [switch]$Back, [scriptblock]$Map)
     if (-not $Map) { $script:FloorMapFr = $Fr; $script:FloorMapBack = [bool]$Back; $Map = { param($Pt) Convert-FloorFrame $Pt $script:FloorMapFr -Back:$script:FloorMapBack } }
     $F = Get-Floor
-    foreach ($R in @($F.Rooms)) { Convert-FloorRect $R $Map }
-    foreach ($K in @($F.Aps.Keys)) { & $Map $F.Aps[$K] }
-    foreach ($Cp in @($F.Route)) { & $Map $Cp }
+    foreach ($R in @($F.Rooms | Where-Object { $_ })) { Convert-FloorRect $R $Map }
+    foreach ($K in @($F.Aps.Keys)) { if ($F.Aps[$K]) { & $Map $F.Aps[$K] } }
+    foreach ($Cp in @($F.Route | Where-Object { $_ })) { & $Map $Cp }
     if ($F.Scale) {
         $A = @{ X = $F.Scale.X1; Y = $F.Scale.Y1 }; $B = @{ X = $F.Scale.X2; Y = $F.Scale.Y2 }
         & $Map $A; & $Map $B
@@ -166,11 +169,11 @@ function Move-FloorItems {
     foreach ($Wf in @(Get-ChildItem $script:WplanDir -Filter ((Split-Path (Get-WplanPath $script:Wplan.Site "walk-") -Leaf) + "*.json") -ErrorAction SilentlyContinue)) {
         try {
             $J = Get-Content $Wf.FullName -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable
-            foreach ($C in @($J.Clicks)) { & $Map $C }
+            foreach ($C in @($J.Clicks | Where-Object { $_ })) { & $Map $C }
             $J | ConvertTo-Json -Depth 8 -Compress | Set-Content -Path $Wf.FullName -Encoding UTF8
         } catch { Write-AppLog "remap walk $($Wf.Name): $_" }
     }
-    if ($script:Walk -and -not $script:Walk.Running) { foreach ($C in @($script:Walk.Clicks)) { & $Map $C } }
+    if ($script:Walk -and -not $script:Walk.Running) { foreach ($C in @($script:Walk.Clicks | Where-Object { $_ })) { & $Map $C } }
 }
 
 # rotate the sheet by 90°: $Dir = 1 clockwise, -1 counter-clockwise; the uncropped original and its crop frame too
@@ -180,18 +183,23 @@ function Invoke-FloorRotate {
     if (-not $P) { return }
     $Rot = { param($Path) $B = Read-FloorBitmapFile $Path; return (New-Object System.Windows.Media.Imaging.TransformedBitmap($B, (New-Object System.Windows.Media.RotateTransform (90 * $script:FloorRotDir)))) }
     $script:FloorRotDir = $Dir
-    $New = & $Rot $P
-    [void](Write-FloorPng $New "floor.png")
-    if ($F.Orig) {
-        $O = Join-Path $script:WplanDir $F.Orig
-        if (Test-Path $O) { [void](Write-FloorPng (& $Rot $O) "floor-orig.png") }
+    try {
+        $New = & $Rot $P
+        $O = $(if ($F.Orig) { Join-Path $script:WplanDir $F.Orig } else { "" })
+        $NewO = $(if ($O -and (Test-Path $O)) { & $Rot $O } else { $null })
+        # CW: (x, y) → (1 − y, x); CCW: (x, y) → (y, 1 − x)
+        $Map = $(if ($Dir -gt 0) { { param($Pt) if (-not $Pt) { return }; $X = [double]$Pt.X; $Pt.X = [Math]::Round(1.0 - [double]$Pt.Y, 5); $Pt.Y = [Math]::Round($X, 5) } } else { { param($Pt) if (-not $Pt) { return }; $X = [double]$Pt.X; $Pt.X = [Math]::Round([double]$Pt.Y, 5); $Pt.Y = [Math]::Round(1.0 - $X, 5) } })
+        Move-FloorItems -Map $Map
+        if ($F.Crop) { Convert-FloorRect $F.Crop $Map }
+        $F.W = $New.PixelWidth; $F.H = $New.PixelHeight
+        [void](Write-FloorPng $New "floor.png")
+        if ($NewO) { [void](Write-FloorPng $NewO "floor-orig.png") }
+        Save-Wplan
+    } catch {
+        Write-AppLog "floor rotate: $_ $($_.ScriptStackTrace)"
+        $script:Wplan = Read-Wplan $script:Wplan.Site
+        Show-Toast "Поворот не удался: $($_.Exception.Message) — план не изменён" "fail"
     }
-    # CW: (x, y) → (1 − y, x); CCW: (x, y) → (y, 1 − x)
-    $Map = $(if ($Dir -gt 0) { { param($Pt) $X = [double]$Pt.X; $Pt.X = [Math]::Round(1.0 - [double]$Pt.Y, 5); $Pt.Y = [Math]::Round($X, 5) } } else { { param($Pt) $X = [double]$Pt.X; $Pt.X = [Math]::Round([double]$Pt.Y, 5); $Pt.Y = [Math]::Round(1.0 - $X, 5) } })
-    Move-FloorItems -Map $Map
-    if ($F.Crop) { Convert-FloorRect $F.Crop $Map }
-    $F.W = $New.PixelWidth; $F.H = $New.PixelHeight
-    Save-Wplan
     Reset-FloorZoom $script:FloorView; Reset-FloorZoom $script:WalkView
     Update-FloorPage
 }
@@ -212,8 +220,8 @@ function Invoke-FloorCrop {
         Copy-Item $P (Join-Path $script:WplanDir $F.Orig) -Force
         $F.Crop = @{ X = 0.0; Y = 0.0; W = 1.0; H = 1.0 }
     }
+    try { Move-FloorItems $Fr } catch { Write-AppLog "floor crop: $_"; $script:Wplan = Read-Wplan $script:Wplan.Site; Show-Toast "Обрезка не удалась: $($_.Exception.Message) — план не изменён" "fail"; Update-FloorPage; return }
     [void](Write-FloorPng $Cut "floor.png")
-    Move-FloorItems $Fr
     # the crop of the original = old crop ∘ new frame
     $C = $F.Crop
     $F.Crop = @{ X = $C.X + $Fr.X * $C.W; Y = $C.Y + $Fr.Y * $C.H; W = $Fr.W * $C.W; H = $Fr.H * $C.H }
@@ -533,6 +541,7 @@ function Update-FloorView {
         $View.Bmp = Read-FloorBitmapFile $P; $View.File = $P; $View.Stamp = (Get-Item $P).LastWriteTimeUtc
     }
     $W = [double]$View.Bmp.PixelWidth; $H = [double]$View.Bmp.PixelHeight
+    if ([int]$F.W -ne [int]$W -or [int]$F.H -ne [int]$H) { $F.W = [int]$W; $F.H = [int]$H }   # size in the plan follows the picture
     $View.W = $W; $View.H = $H
     $Cv.Width = $W; $Cv.Height = $H
     $Img = New-Object System.Windows.Controls.Image
