@@ -1,4 +1,4 @@
-# Microphone recorder process (WASAPI shared capture → 16 kHz mono 16-bit WAV for whisper.cpp).
+# Microphone recorder process (WASAPI shared capture → 16 kHz mono 16-bit WAV for the server speech recognition).
 # Runs under Windows PowerShell 5.1 (powershell.exe), NOT pwsh: PowerShell 7 from the Microsoft Store is a packaged
 # app without the microphone capability — Windows denies it the microphone silently (E_ACCESSDENIED, no prompt).
 # Protocol on stdout: "START" when capturing, "LVL <0..32767>" every 250 ms, "DONE <seconds>" at the end,
@@ -84,7 +84,7 @@ namespace NkMic {
                 bw.Write(new char[] { 'f', 'm', 't', ' ' }); bw.Write(16); bw.Write((short)1); bw.Write((short)1); bw.Write(16000); bw.Write(32000); bw.Write((short)2); bw.Write((short)16);
                 bw.Write(new char[] { 'd', 'a', 't', 'a' }); bw.Write((int)bytes);
                 bw.Flush(); fs.Dispose(); fs = null;
-                // laptop microphone arrays record quietly: normalise to ~90 % (at most ×20) so whisper hears soft speech
+                // laptop microphone arrays record quietly: normalise to ~90 % (at most ×20) so speech recognition hears soft speech
                 if (maxAll > 0 && maxAll < 16000 && bytes > 0) {
                     double g = Math.Min(20.0, 29500.0 / maxAll);
                     using (var rw = new FileStream(path, FileMode.Open, FileAccess.ReadWrite)) {

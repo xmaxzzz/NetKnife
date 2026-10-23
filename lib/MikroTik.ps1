@@ -323,8 +323,7 @@ function Stop-MtFeed { Stop-Worker "roam-mt"; Stop-Worker "roam-mtlog" }
 function Set-MtStatus {
     param([string]$Text, [string]$Kind = "info")
     $Br = Get-Brush $(switch ($Kind) { "ok" { "Ok" } "fail" { "Fail" } "wait" { "Warn" } default { "Sub" } })
-    foreach ($T in @($Ui.SetMtStatus, $Ui.WhRouterStatus)) { if ($T) { $T.Text = $Text; $T.Foreground = $Br } }
-    if ($Ui.WhAps -and $script:WhInit -and $Kind -eq "ok") { try { Update-WhPrep } catch { } }
+    if ($Ui.SetMtStatus) { $Ui.SetMtStatus.Text = $Text; $Ui.SetMtStatus.Foreground = $Br }
 }
 
 function Refresh-MtList {
@@ -460,7 +459,7 @@ function Show-MtConnectDialog {
     Refresh-MtList
     Set-MtStatus "$($New.Name): $($C.Info) · чтение butler-service, запись butler-rw (только с подтверждением)" "ok"
     Show-Toast "$($New.Name) подключён"
-    Start-MtApRefresh $New { param($A) if ($script:WhInit) { try { Update-WhPrep } catch { } } }
+    Start-MtApRefresh $New
 }
 function Show-MtApsDialog {
     param($R)

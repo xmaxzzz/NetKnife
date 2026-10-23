@@ -2,11 +2,10 @@
 # channel, link rate) and probes four layers in parallel — gateway (ICMP), internet (ICMP to a few hosts),
 # DNS (raw UDP query to the configured server, bypassing the Windows cache) and every 2 s the gateway MAC (ARP).
 # The UI turns that stream into events (roam with recovery time, Wi-Fi drop, gateway/internet/DNS outage,
-# address/subnet/gateway-MAC change) plus per-AP statistics, and derives a diagnosis per AP:
-# uplink trouble (loss/jitter at good signal), VLAN/subnet mismatch, slow roam (802.11r/PMF or switch), sticky
-# client. Windows WLAN-AutoConfig log entries (disconnect reasons) are pulled into the timeline.
+# address/subnet/gateway-MAC change) plus live per-AP numbers. Windows WLAN-AutoConfig log entries (disconnect
+# reasons) are pulled into the timeline. During a walk the samples become Conn[] and the log becomes Events[];
+# the verdicts and the diagnosis are made by the HelpDesk server.
 
-$script:RoamDir = Join-Path $script:DataDir "roam"
 $script:RoamEvents = New-Object System.Collections.ObjectModel.ObservableCollection[object]
 $script:RoamApItems = New-Object System.Collections.ObjectModel.ObservableCollection[object]
 $script:Roam = $null
@@ -86,11 +85,9 @@ $script:RoamBody = {
 function Get-RoamApName {
     param([string]$Bssid)
     if (-not $Bssid) { return "—" }
-    # names typed in the Wi-Fi planner (any loaded plan) win
-    if ($script:Wplan -and $script:Wplan.Aps) {
-        $K = Get-WplanKey $Bssid
-        if ($script:Wplan.Aps.ContainsKey($K) -and $script:Wplan.Aps[$K].Name) { return $script:Wplan.Aps[$K].Name }
-    }
+    # names of the plan in HelpDesk (aps[].bssids of the selected plan) win
+    $Pn = Find-CollectorApName (Get-SurveyPlan) $Bssid
+    if ($Pn) { return $Pn }
     $Nm = $script:Settings.RoamNames
     if ($Nm -and $Nm[$Bssid]) { return "$($Nm[$Bssid])" }
     $Mt = Get-MtApName $Bssid
@@ -107,7 +104,8 @@ function Add-RoamEvent {
     $E = [pscustomobject]@{ Time = $Time.ToString("HH:mm:ss"); Kind = $Kind; Title = $Title; Detail = $Detail; Raw = $Time }
     $script:RoamEvents.Insert(0, $E)
     while ($script:RoamEvents.Count -gt 500) { $script:RoamEvents.RemoveAt($script:RoamEvents.Count - 1) }
-    $script:Roam.Log.Add([ordered]@{ Time = $Time.ToString("s"); Kind = $Kind; Title = $Title; Detail = $Detail })
+    # with fractions of a second: the walk turns these into Events[].T relative to its start
+    $script:Roam.Log.Add([ordered]@{ Time = $Time.ToString("o"); Kind = $Kind; Title = $Title; Detail = $Detail })
     return $E
 }
 
@@ -116,7 +114,7 @@ function Set-RoamEvent {
     $i = $script:RoamEvents.IndexOf($E)
     $N = [pscustomobject]@{ Time = $E.Time; Kind = $Kind; Title = $Title; Detail = $Detail; Raw = $E.Raw }
     if ($i -ge 0) { $script:RoamEvents[$i] = $N }
-    $script:Roam.Log.Add([ordered]@{ Time = $E.Raw.ToString("s"); Kind = $Kind; Title = $Title; Detail = $Detail })
+    $script:Roam.Log.Add([ordered]@{ Time = $E.Raw.ToString("o"); Kind = $Kind; Title = $Title; Detail = $Detail })
     return $N
 }
 
@@ -256,32 +254,16 @@ function Complete-RoamPending {
     [void](Set-RoamEvent $Pd.Ev $Kind $Pd.Title $Det)
 }
 
-# ---------------------------------------------------------------- stats / diagnosis
+# ---------------------------------------------------------------- live numbers per AP
 
-function Get-RoamApVerdict {
+function Get-RoamApNumbers {
     param($St)
-    $Msgs = @(); $Kind = "ok"
     $Rssi = $(if ($St.N) { [int]($St.RssiSum / $St.N) } else { 0 })
     $GwN = $St.GwOk + $St.GwFail
     $Loss = $(if ($GwN) { 100.0 * $St.GwFail / $GwN } else { 0 })
     $Avg = $(if ($St.GwOk) { $St.GwSum / $St.GwOk } else { 0 })
     $Jit = $(if ($St.GwOk -gt 1) { [Math]::Sqrt([Math]::Max(0.0, $St.GwSq / $St.GwOk - $Avg * $Avg)) } else { 0 })
-    $RoamAvg = $(if (@($St.RoamOut).Count) { (@($St.RoamOut) | Measure-Object -Average).Average } else { 0 })
-    if ($St.NetChanges) { $Kind = "fail"; $Msgs += "после перехода на неё меняется сеть (адрес/шлюз/MAC шлюза) — VLAN на порту коммутатора этой точки или профиль SSID не тот" }
-    if ($GwN -ge 20 -and $Loss -ge 3 -and $Rssi -ge -67) { $Kind = "fail"; $Msgs += ("потери до шлюза {0:N0}% при хорошем сигнале {1} dBm — uplink точки: кабель/разъём, скорость порта (10/100?), PoE, mesh-канал" -f $Loss, $Rssi) }
-    elseif ($GwN -ge 20 -and $Loss -ge 3) { if ($Kind -eq "ok") { $Kind = "warn" }; $Msgs += ("потери {0:N0}% при сигнале {1} dBm — слабое покрытие, см. Wi-Fi план" -f $Loss, $Rssi) }
-    if ($St.GwOk -ge 20 -and ($Jit -ge 25 -or $Avg -ge 30) -and $Rssi -ge -67) { if ($Kind -eq "ok") { $Kind = "warn" }; $Msgs += ("задержка до шлюза {0:N0}±{1:N0} мс при хорошем сигнале — перегруженный канал, mesh-uplink или порт" -f $Avg, $Jit) }
-    if ($RoamAvg -ge 1.5 -and -not $St.NetChanges) { if ($Kind -eq "ok") { $Kind = "warn" }; $Msgs += ("переход на неё в среднем {0:N1} с без связи — 802.11r/PMF несовместимость или коммутатор медленно переучивает MAC (STP/петля)" -f $RoamAvg) }
-    if ($St.Drops) { if ($Kind -eq "ok") { $Kind = "warn" }; $Msgs += "обрывов шлюза без перехода: $($St.Drops) (всего $(Format-RoamSec $St.DropSec))" }
-    if ($St.Disc) { if ($Kind -eq "ok") { $Kind = "warn" }; $Msgs += "Wi-Fi отключался: $($St.Disc) раз" }
-    if (@($St.Reasons).Count) { $Msgs += "Windows: " + (@($St.Reasons | Select-Object -Unique) -join "; ") }
-    # router view of the same AP: pings from MikroTik over the wire (switch → AP), independent of Wi-Fi
-    $Rt = $(if ($script:Roam -and $script:Roam.MtAp) { $script:Roam.MtAp[(Get-MtApKey $St.Bssid)] } else { $null })
-    if ($Rt -and ($Rt.Ok + $Rt.Fail) -ge 3) {
-        if ($Rt.Fail) { $Kind = "fail"; $Msgs = @(("с роутера до точки по проводу тоже потери: {0} из {1} — проводная часть (кабель, порт коммутатора, PoE), не Wi-Fi" -f $Rt.Fail, ($Rt.Ok + $Rt.Fail))) + $Msgs }
-        elseif ($Loss -ge 3) { $Msgs += "роутер видит точку по проводу без потерь — значит, теряется на радио-участке или в самой точке (перегрузка, прошивка)" }
-    }
-    return @{ Kind = $Kind; Msgs = $Msgs; Rssi = $Rssi; Loss = $Loss; Avg = $Avg; Jit = $Jit; RoamAvg = $RoamAvg }
+    return @{ Rssi = $Rssi; Loss = $Loss; Avg = $Avg; Jit = $Jit }
 }
 
 function Update-RoamAps {
@@ -289,40 +271,14 @@ function Update-RoamAps {
     $Sel = $(if ($Ui.RoamAps.SelectedItem) { $Ui.RoamAps.SelectedItem.Bssid } else { $null })
     $script:RoamApItems.Clear()
     foreach ($St in @($script:Roam.Stats.Values | Sort-Object { -$_.Sec })) {
-        $V = Get-RoamApVerdict $St
+        $V = Get-RoamApNumbers $St
         $Cur = ($script:Roam.Last -and $script:Roam.Last.Bssid -eq $St.Bssid)
-        $script:RoamApItems.Add([pscustomobject]@{ Bssid = $St.Bssid; Name = "$(Get-RoamApName $St.Bssid)$(if ($Cur) { '  ●' })"; Kind = $V.Kind
-            Meta = "$($St.Bssid) · кан. $($St.Ch) ($(Get-RoamBand $St.Ch) ГГц) · $(Format-RoamSec $St.Sec)"
-            Line = ("{0} dBm · потери {1:N0}% · шлюз {2:N0}±{3:N0} мс · заходов {4} · обрывов {5}" -f $V.Rssi, $V.Loss, $V.Avg, $V.Jit, $St.RoamsIn, ($St.Drops + @($St.RoamOut | Where-Object { $_ -ge 1 }).Count))
-            Verdict = $(if ($V.Msgs.Count) { $V.Msgs[0] } else { "без замечаний" }) })
+        $Drops = $St.Drops + $St.Disc + @($St.RoamOut | Where-Object { $_ -ge 1 }).Count
+        $script:RoamApItems.Add([pscustomobject]@{ Bssid = $St.Bssid; Name = "$(Get-RoamApName $St.Bssid)$(if ($Cur) { '  ●' })"; Kind = $(if ($Drops) { "warn" } else { "ok" })
+            Meta = "$($St.Bssid) · кан. $($St.Ch) ($(Get-RoamBand $St.Ch) ГГц) · на точке $(Format-RoamSec $St.Sec)"
+            Line = ("{0} dBm · потери {1:N0}% · шлюз {2:N0}±{3:N0} мс · переходов {4} · обрывов {5}" -f $V.Rssi, $V.Loss, $V.Avg, $V.Jit, $St.RoamsIn, $Drops) })
     }
     if ($Sel) { $Ui.RoamAps.SelectedItem = ($script:RoamApItems | Where-Object { $_.Bssid -eq $Sel } | Select-Object -First 1) }
-}
-
-function Get-RoamDiagnosis {
-    $R = $script:Roam
-    if (-not $R -or -not $R.Count) { return "Нет данных. Нажми «Старт» и походи по объекту, проходя через зоны разных точек; задержись там, где обычно пропадает связь." }
-    $Out = [System.Text.StringBuilder]::new()
-    $Dur = ([DateTime]::Now - $R.Started).TotalMinutes
-    $Roams = @($R.Log | Where-Object { $_.Title -like "Роуминг*" } | Group-Object Time | ForEach-Object { $_.Group[-1] })
-    $Bad = @($Roams | Where-Object { $_.Kind -in @("warn", "fail") })
-    [void]$Out.AppendLine(("МОНИТОР РОУМИНГА · {0:N1} мин · замеров {1} · переходов {2}, из них с потерей связи {3}" -f $Dur, $R.Count, $Roams.Count, $Bad.Count))
-    [void]$Out.AppendLine("")
-    foreach ($St in @($R.Stats.Values | Sort-Object { -$_.Sec })) {
-        $V = Get-RoamApVerdict $St
-        $Mark = switch ($V.Kind) { "fail" { "✖" } "warn" { "▲" } default { "✔" } }
-        [void]$Out.AppendLine(("{0} {1}  ({2}, кан. {3}, {4})" -f $Mark, (Get-RoamApName $St.Bssid), $St.Bssid, $St.Ch, (Format-RoamSec $St.Sec)))
-        [void]$Out.AppendLine(("    сигнал {0} dBm (мин {1}) · потери до шлюза {2:N1}% · задержка {3:N0}±{4:N0} мс · интернет-потери {5:N1}% · заходов {6}" -f $V.Rssi, $St.RssiMin, $V.Loss, $V.Avg, $V.Jit, $(if ($St.NetOk + $St.NetFail) { 100.0 * $St.NetFail / ($St.NetOk + $St.NetFail) } else { 0 }), $St.RoamsIn))
-        if ($V.Msgs.Count) { foreach ($Ms in $V.Msgs) { [void]$Out.AppendLine("    → $Ms") } } else { [void]$Out.AppendLine("    → без замечаний") }
-    }
-    [void]$Out.AppendLine("")
-    [void]$Out.AppendLine("ЧТО ПРОВЕРИТЬ В OMADA")
-    [void]$Out.AppendLine("• uplink: Devices → точка → Details: скорость порта/uplink (должно быть 1000 Мбит), для mesh — сигнал uplink; порт коммутатора — ошибки CRC.")
-    [void]$Out.AppendLine("• VLAN: Settings → Wireless Networks → SSID → VLAN; порт коммутатора точки — нужный VLAN тегирован (профиль порта).")
-    [void]$Out.AppendLine("• роуминг: Site Settings → Wireless Features → Fast Roaming (802.11r) — попробуй выключить, если переходы с паузой; PMF «Capable», не «Mandatory».")
-    [void]$Out.AppendLine("• коммутатор: петли/STP (Loopback Detection), на портах точек — без задержек STP (edge/portfast).")
-    $script:RoamLastText = $Out.ToString()
-    return $Out.ToString()
 }
 
 # ---------------------------------------------------------------- run
@@ -332,7 +288,6 @@ function Start-RoamMonitor {
     $Targets = @("$($Ui.RoamTargets.Text)" -split '[,;\s]+' | Where-Object { $_ -match '^\d{1,3}(\.\d{1,3}){3}$' })
     if (-not $Targets.Count) { $Targets = @("8.8.8.8", "77.88.8.8"); $Ui.RoamTargets.Text = $Targets -join ", " }
     $script:Settings.RoamTargets = $Ui.RoamTargets.Text; Save-Settings
-    if ($script:Wplan -eq $null -and $script:Settings.WplanSite) { try { $script:Wplan = Read-Wplan "$($script:Settings.WplanSite)" } catch { } }   # AP names from the planner
     $script:Roam = @{ Running = $true; Started = [DateTime]::Now; Stats = @{}; Log = [System.Collections.Generic.List[object]]::new(); Prev = $null; Last = $null; Pending = $null; Out = $null; Disc = $null; GwMac = ""; GwMacIp = ""; Count = 0
         Mt = $null; MtAp = @{} }
     $RtId = "$($Ui.RoamRouter.SelectedValue)"
@@ -346,7 +301,6 @@ function Start-RoamMonitor {
     }
     $script:RoamEvents.Clear(); $script:RoamApItems.Clear()
     $Ui.RoamStart.IsEnabled = $false; $Ui.RoamStop.IsEnabled = $true
-    $Ui.RoamDiag.Text = ""
     [void](Add-RoamEvent ([DateTime]::Now) "info" "Монитор запущен" "интернет: $($Targets -join ', ') · шаг 0.5 с")
     [void](Start-Worker -Name "roam" -Replace -Body $script:RoamBody -ArgList (@(, $Targets) + @(500)) -OnMessage {
         param($M)
@@ -386,21 +340,7 @@ function Stop-RoamMonitor {
     if ($script:Roam.Out) { Close-RoamOutage ([DateTime]::Now) }
     $Ui.RoamStart.IsEnabled = $true; $Ui.RoamStop.IsEnabled = $false
     Update-RoamAps
-    if (-not $Quiet) { $Ui.RoamDiag.Text = Get-RoamDiagnosis }
-    Save-RoamSession
-    if (-not $Quiet) { try { Save-WhRoamResult } catch { Write-AppLog "wizard roam save: $_" } }
     Update-PageSub
-}
-
-function Save-RoamSession {
-    try {
-        if (-not $script:Roam -or -not $script:Roam.Count) { return }
-        if (-not (Test-Path $script:RoamDir)) { New-Item -ItemType Directory -Path $script:RoamDir | Out-Null }
-        $F = Join-Path $script:RoamDir ("roam-{0:yyyy-MM-dd_HHmm}.json" -f $script:Roam.Started)
-        $Stats = @{}; foreach ($K in $script:Roam.Stats.Keys) { $Stats[$K] = $script:Roam.Stats[$K] }
-        @{ Started = $script:Roam.Started.ToString("s"); Samples = $script:Roam.Count; Log = $script:Roam.Log; Stats = $Stats; Diagnosis = "$($script:RoamLastText)" } | ConvertTo-Json -Depth 6 | Set-Content -Path $F -Encoding UTF8
-        $script:RoamLastFile = $F
-    } catch { Write-AppLog "roam save: $_" }
 }
 
 function Set-RoamPill {
@@ -430,29 +370,12 @@ function Get-RoamSub {
     return "Ходи по объекту — монитор поймает переходы между точками и пропадания связи"
 }
 
-function Start-RoamAi {
-    if (-not $script:Roam -or -not $script:Roam.Count) { Show-Toast "Нет данных — сначала запиши обход" "warn"; return }
-    $Diag = Get-RoamDiagnosis
-    $Ev = @($script:Roam.Log | Select-Object -Last 150)
-    $Sys = "Ты сетевой инженер, разбираешь проблемы роуминга в Wi-Fi на TP-Link Omada. Дан журнал монитора ноутбука: события роуминга с временем восстановления связи до шлюза и интернета, обрывы, смены адреса/шлюза/MAC шлюза, записи журнала Windows WLAN-AutoConfig и статистика по каждой точке. Определи наиболее вероятные причины по каждой проблемной точке, предложи конкретные проверки и настройки в Omada и на коммутаторе в порядке приоритета. По-русски, кратко, по пунктам."
-    $Data = @{ Diagnosis = $Diag; Events = $Ev } | ConvertTo-Json -Depth 6 -Compress
-    $Ui.RoamAi.IsEnabled = $false
-    $Ok = Start-AiRequest -Name "roam-ai" -System $Sys -UserText "Данные:`n$Data" -MaxTokens 2500 -OnResult {
-        param($M)
-        $Ui.RoamAi.IsEnabled = $true
-        if (-not $M.Ok) { Show-Toast "ИИ: $($M.Text)" "fail"; return }
-        $Ui.RoamDiag.Text = $Ui.RoamDiag.Text + "`r`n`r`n━━━ СОВЕТ ИИ ━━━`r`n" + $M.Text
-        $Ui.RoamDiag.ScrollToEnd()
-    }
-    if (-not $Ok) { $Ui.RoamAi.IsEnabled = $true }
-}
-
 function Show-RoamNameDialog {
     param([string]$Bssid)
     $D = New-Dialog "Имя точки" @"
 <StackPanel>
     <TextBlock Text="Имя точки" FontFamily="{StaticResource DisplayFont}" FontSize="20" FontWeight="SemiBold"/>
-    <TextBlock Text="$Bssid — как в Omada. Имена из «Wi-Fi плана» подставляются сами." Foreground="{StaticResource Sub}" TextWrapping="Wrap" Margin="0,6,0,12" FontSize="12.5"/>
+    <TextBlock Text="$Bssid — как в Omada. Имена из плана в Helpdesk подставляются сами." Foreground="{StaticResource Sub}" TextWrapping="Wrap" Margin="0,6,0,12" FontSize="12.5"/>
     <TextBox x:Name="FName" Style="{StaticResource Field}"/>
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
         <Button Style="{StaticResource Btn}" Content="Отмена" MinWidth="96" IsCancel="True"/>
@@ -575,14 +498,10 @@ function Initialize-RoamPage {
     Update-RoamRouterList
     $Ui.RoamStart.Add_Click({ Start-RoamMonitor })
     $Ui.RoamStop.Add_Click({ Stop-RoamMonitor })
-    $Ui.RoamDiagBtn.Add_Click({ Update-RoamAps; $Ui.RoamDiag.Text = Get-RoamDiagnosis })
     $Ui.RoamCopy.Add_Click({
-        $T = Get-RoamDiagnosis
         $Ev = @($script:RoamEvents | Select-Object -First 200 | ForEach-Object { "$($_.Time)  $($_.Title)$(if ($_.Detail) { ' — ' + $_.Detail })" })
-        Copy-Text ($T + "`r`nСОБЫТИЯ`r`n" + ($Ev -join "`r`n")) "диагноз и события"
+        Copy-Text ($Ev -join "`r`n") "события"
     })
-    $Ui.RoamAi.Add_Click({ Start-RoamAi })
-    $Ui.RoamFolder.Add_Click({ if (-not (Test-Path $script:RoamDir)) { New-Item -ItemType Directory -Path $script:RoamDir | Out-Null }; Start-Process explorer.exe -ArgumentList (Quote-Arg $script:RoamDir) })
     $Ui.RoamAps.Add_MouseDoubleClick({ $R = $Ui.RoamAps.SelectedItem; if ($R) { Show-RoamNameDialog $R.Bssid } })
     $Ui.RoamAps.ContextMenu = New-ContextMenu @(
         (New-MenuItem "Имя точки…" 0xE70F { $R = $Ui.RoamAps.SelectedItem; if ($R) { Show-RoamNameDialog $R.Bssid } } "2×клик")

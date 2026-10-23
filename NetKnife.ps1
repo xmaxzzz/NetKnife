@@ -34,14 +34,12 @@ function Write-AppLog {
 . (Join-Path $PSScriptRoot "pages\Vpn.ps1")
 . (Join-Path $PSScriptRoot "pages\Conns.ps1")
 . (Join-Path $PSScriptRoot "lib\WlanApi.ps1")
-. (Join-Path $PSScriptRoot "lib\Ai.ps1")
-. (Join-Path $PSScriptRoot "pages\WifiPlan.ps1")
+. (Join-Path $PSScriptRoot "lib\Collector.ps1")
 . (Join-Path $PSScriptRoot "pages\Roam.ps1")
 . (Join-Path $PSScriptRoot "lib\Mic.ps1")
-. (Join-Path $PSScriptRoot "lib\Whisper.ps1")
-. (Join-Path $PSScriptRoot "pages\Floor.ps1")
+. (Join-Path $PSScriptRoot "pages\PlanView.ps1")
 . (Join-Path $PSScriptRoot "pages\Walk.ps1")
-. (Join-Path $PSScriptRoot "pages\WifiHub.ps1")
+. (Join-Path $PSScriptRoot "pages\Survey.ps1")
 . (Join-Path $PSScriptRoot "pages\Monitor.ps1")
 . (Join-Path $PSScriptRoot "pages\Wifi.ps1")
 . (Join-Path $PSScriptRoot "pages\Terminal.ps1")
@@ -111,7 +109,7 @@ $script:Pages = [ordered]@{
     monitor = @{ Panel = "PageMonitor"; Nav = "NavMonitor"; Title = "Монитор";      Sub = { Get-MonitorSub }; Focus = "MonTarget" }
     vpn   = @{ Panel = "PageVpn";   Nav = "NavVpn";   Title = "VPN";                Sub = { Get-VpnSub };   Focus = "VpnList" }
     conns = @{ Panel = "PageConns"; Nav = "NavConns"; Title = "Соединения программ"; Sub = { Get-ConnsSub }; Focus = "ConnProc" }
-    wifi  = @{ Panel = "PageWifiHub"; Nav = "NavWifi"; Title = "Wi-Fi";            Sub = { Get-WhSub };    Focus = "WhNext" }
+    wifi  = @{ Panel = "PageSurvey"; Nav = "NavWifi"; Title = "Wi-Fi обход";      Sub = { Get-SurveySub }; Focus = "SvSite" }
     hosts = @{ Panel = "PageHosts"; Nav = "NavHosts"; Title = "Хосты";              Sub = { Get-HostsSub }; Focus = "HostSearch" }
     keys  = @{ Panel = "PageKeys";  Nav = "NavKeys";  Title = "Ключи";              Sub = { Get-KeysSub };  Focus = "KeySearch" }
     tunnels = @{ Panel = "PageTunnels"; Nav = "NavTunnels"; Title = "Туннели";      Sub = { Get-TunnelsSub }; Focus = "TunnelList" }
@@ -132,7 +130,7 @@ function Set-Page {
     $Ui.KeysTools.Visibility = $(if ($Name -eq "keys") { "Visible" } else { "Collapsed" })
     $Ui.PageTitle.Text = $script:Pages[$Name].Title
     if ($Name -eq "terminal") { Show-TerminalPage }
-    if ($Name -eq "wifi") { Show-WifiHub }
+    if ($Name -eq "wifi") { Show-SurveyPage }
     $script:Navigating = $true
     $Ui[$script:Pages[$Name].Nav].IsChecked = $true
     $script:Navigating = $false
@@ -170,7 +168,7 @@ function Invoke-TagAction {
         "scan"  { Start-NetScan $Val }
         "tun"   { Invoke-TunnelAction $Val }
         "vpn"   { Invoke-VpnAction $Val }
-        "wh"    { Set-WhStep ([int]$Val) }
+        "cq"    { Invoke-SurveyQueueAction $Val }
         "mon"   { Invoke-MonAction $Val }
         "host"  {
             Set-Page "hosts"
@@ -203,7 +201,7 @@ $Win.Add_PreviewKeyDown({
     if ($Ctrl -and $Key -eq "F") { $T = $Ui[$script:Pages[$script:Page].Focus]; [void]$T.Focus(); if ($T -is [System.Windows.Controls.TextBox]) { $T.SelectAll() }; $E.Handled = $true; return }
     if ($Ctrl -and $Key -eq "L") { [void]$Ui.QuickPing.Focus(); $E.Handled = $true; return }
     if ($Key -eq "F5") {
-        switch ($script:Page) { "hosts" { Refresh-Ssh; Show-Toast "Перечитано" } "keys" { Refresh-Ssh; Show-Toast "Перечитано" } "tunnels" { Refresh-Tunnels } "vpn" { Refresh-Vpn } "monitor" { Start-Monitor; Show-Toast "Монитор перезапущен" "info" } "wifi" { if ($Ui.PageWifi.Visibility -eq "Visible") { Start-WifiScan } else { Set-WhStep $script:WhStep } } "scan" { Start-NetScan } "ports" { Start-PortScan } "ping" { Start-Ping } "dns" { Start-DnsQuery } }
+        switch ($script:Page) { "hosts" { Refresh-Ssh; Show-Toast "Перечитано" } "keys" { Refresh-Ssh; Show-Toast "Перечитано" } "tunnels" { Refresh-Tunnels } "vpn" { Refresh-Vpn } "monitor" { Start-Monitor; Show-Toast "Монитор перезапущен" "info" } "wifi" { if ($Ui.PageWifi.Visibility -eq "Visible") { Start-WifiScan } else { Start-SurveyDirectory -Manual } } "scan" { Start-NetScan } "ports" { Start-PortScan } "ping" { Start-Ping } "dns" { Start-DnsQuery } }
         $E.Handled = $true; return
     }
     if ($Key -eq "Escape" -and $InText) {
@@ -275,9 +273,8 @@ Initialize-HostsPage
 Initialize-TunnelsPage
 Initialize-VpnPage
 Initialize-ConnsPage
-Initialize-WifiPlanPage
 Initialize-RoamPage
-Initialize-WifiHub
+Initialize-SurveyPage
 Initialize-TerminalPage
 Initialize-MonitorPage
 Initialize-WifiPage
@@ -344,7 +341,8 @@ $Win.Add_Closing({
     Stop-AllTunnels
     Stop-Vpn -Quiet
     Stop-Worker "conns"
-    try { if ($script:Walk -and $script:Walk.Running -and $script:Walk.Mic) { $script:Walk.Mic.Stop() } } catch { }
+    # a walk in progress is saved and queued without questions; it is sent on the next start
+    try { if ($script:Walk -and $script:Walk.Running) { Stop-Walk -Closing } } catch { Write-AppLog "walk on close: $_" }
     try { Stop-RoamMonitor -Quiet } catch { }
     try { Stop-MtFeed } catch { }
     Stop-TermSession
