@@ -65,7 +65,7 @@ function ConvertTo-GzipBytes {
     $Ms = [IO.MemoryStream]::new()
     $Gz = [IO.Compression.GZipStream]::new($Ms, [IO.Compression.CompressionLevel]::Optimal)
     $Gz.Write($Bytes, 0, $Bytes.Length); $Gz.Dispose()
-    return $Ms.ToArray()
+    return , $Ms.ToArray()   # the comma keeps byte[]: unrolled into object[] it would go out as text, not gzip
 }
 
 function Get-CollectorJsonOptions {

@@ -34,6 +34,8 @@ function Invoke-FakeHttp {
     }
     $Rel = $Path -replace '^/api/v1/wifi/collector', ''
     $M = $Method.ToUpper()
+    # Invoke-WebRequest sends only a byte[] as raw bytes; an object[] of numbers would go out as text
+    if ($null -ne $Body -and $Body -isnot [byte[]]) { return New-FakeErr 400 "bad_body" "тело не byte[] ($($Body.GetType().Name))" }
     if ($Rel -eq "/pair" -and $M -eq "POST") {
         $F.PairCalls++
         $J = [Text.Encoding]::UTF8.GetString([byte[]]$Body) | ConvertFrom-Json -AsHashtable
