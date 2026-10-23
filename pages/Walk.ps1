@@ -149,10 +149,13 @@ function Add-WalkRoom {
     Add-WalkFeed "Я в: $Room"
 }
 
-# monitor log → events on the walk clock: T ≥ 0, Title ≤ 300, Detail ≤ 1000 (§4.4)
+# monitor log → events on the walk clock: T ≥ 0, Title ≤ 300, Detail ≤ 1000 (§4.4). A monitor started before the
+# walk (tab «Монитор») keeps its older events in the log — those are not part of the walk.
 function Get-WalkEvents {
+    $From = $script:Walk.Started.AddSeconds(-5)
     $Ev = @(foreach ($L in @($script:Roam.Log)) {
         $Tm = [DateTime]::Parse($L.Time, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+        if ($Tm -lt $From) { continue }
         $Ti = "$($L.Title)"; if ($Ti.Length -gt 300) { $Ti = $Ti.Substring(0, 299) + "…" }
         $De = "$($L.Detail)"; if ($De.Length -gt 1000) { $De = $De.Substring(0, 999) + "…" }
         @{ T = [Math]::Max(0.0, (Get-WalkSec $Tm)); Kind = $L.Kind; Title = $Ti; Detail = $De }
@@ -189,9 +192,10 @@ function Save-WalkFile {
     param([switch]$Partial)
     $K = $script:Walk; if (-not $K) { return }
     $Dur = $(if ($Partial) { [Math]::Max(0.1, (Get-WalkSec ([DateTime]::Now))) } else { $K.Duration })
-    $Ev = $(if ($Partial) { @(Get-WalkEvents) } else { @($K.Events) })
+    # no $( … ) here: it would unroll a single event into an object and the server wants an array
+    $Ev = if ($Partial) { @(Get-WalkEvents) } else { @($K.Events) }
     $O = [ordered]@{ Id = $K.Id; Site = $K.Target.Site; Phase = $K.Phase; Series = $K.Series; Started = $K.Started.ToString("o"); Duration = $Dur; Wav = $(if ($K.Wav) { Split-Path $K.Wav -Leaf } else { "" })
-        Clicks = @($K.Clicks); Marks = @($K.Marks); Conn = @($K.Conn); Scans = @($K.Scans); Events = $Ev; Rooms = @($K.Rooms) }
+        Clicks = @($K.Clicks); Marks = @($K.Marks); Conn = @($K.Conn); Scans = @($K.Scans); Events = @($Ev); Rooms = @($K.Rooms) }
     $P = $(if ($Partial) { "$($K.Base).json.partial" } else { "$($K.Base).json" })
     try { Write-CollectorFile $P ($O | ConvertTo-Json -Depth 8 -Compress) } catch { Write-AppLog "walk save: $_" }
 }
@@ -250,7 +254,8 @@ function Initialize-WalkPage {
     $Ui.WkStop.Add_Click({ Stop-Walk })
     $Ui.WkMark.Add_Click({ Add-WalkMark })
     $Ui.WkCheck.Add_Click({ Add-WalkCheckpoint })
-    $Ui.WkRoom.Add_SelectionChanged({ if ($script:Walk -and $script:Walk.Running -and $Ui.WkRoom.SelectedItem) { Add-WalkRoom "$($Ui.WkRoom.SelectedItem)" } })
+    # the choice is recorded and the box cleared, so the same room can be picked again later («Я в» shows in WkNow)
+    $Ui.WkRoom.Add_SelectionChanged({ if ($script:Walk -and $script:Walk.Running -and $Ui.WkRoom.SelectedItem) { Add-WalkRoom "$($Ui.WkRoom.SelectedItem)"; $Ui.WkRoom.SelectedIndex = -1 } })
     # Space = «Дошёл» (or «Отметка» without a route) while walking — hands busy with the laptop
     $script:Win.Add_PreviewKeyDown({
         param($S, $E)

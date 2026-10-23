@@ -381,7 +381,7 @@ function Get-OutboxItems {
             $St = Read-OutboxState $D.FullName
             if ($St) { @{ Key = (Get-OutboxKey $D.FullName); Dir = $D.FullName; State = $St; Paused = (Test-Path (Join-Path $S.FullName ".paused")) } }
         }
-    }) | Sort-Object { "$($_.State.QueuedAt)" }
+    }) | Sort-Object { ConvertTo-CollectorDate $_.State.QueuedAt }
 }
 
 function Test-OutboxDue {
@@ -682,9 +682,13 @@ function Invoke-OutboxPass {
         if (-not (Test-OutboxDue $I)) { continue }
         $C = $Conns["$($St.Url)|$($St.Site)"]
         if (-not $C -or -not $C.Token) {
-            if ($St.State -in @("queued", "sending") -and $St.ErrKind -ne "noconn") {
+            if ($St.State -in @("queued", "sending")) {
+                $New = ($St.ErrKind -ne "noconn")
+                # waits for a connection: checked again in a minute, or at once after pairing («Отправить сейчас»)
                 $St.State = "queued"; $St.ErrKind = "noconn"; $St.LastError = "Объект «$($St.SiteName)» не подключён — подключите сборщик кодом"
-                Save-OutboxState $I.Dir $St; Send-OutboxEvent @{ OnEvent = $OnEvent } $I.Dir $St
+                $St.NextAt = [DateTime]::Now.AddSeconds(60).ToString("o")
+                Save-OutboxState $I.Dir $St
+                if ($New) { Send-OutboxEvent @{ OnEvent = $OnEvent } $I.Dir $St }
             }
             continue
         }

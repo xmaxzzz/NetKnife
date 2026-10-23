@@ -175,7 +175,12 @@ function Update-PlanView {
     $Cv.Children.Clear()
     if (-not $Plan -or -not $ImagePath -or -not (Test-Path $ImagePath)) { $View.Box.Visibility = "Collapsed"; $View.Tools.Visibility = "Collapsed"; $View.Placeholder.Visibility = "Visible"; $View.W = 0; return }
     $View.Box.Visibility = "Visible"; $View.Tools.Visibility = "Visible"; $View.Placeholder.Visibility = "Collapsed"
-    if ($View.File -ne $ImagePath -or -not $View.Bmp) { Reset-PlanZoom $View; $View.Bmp = Read-PlanBitmapFile $ImagePath; $View.File = $ImagePath }
+    if ($View.File -ne $ImagePath -or -not $View.Bmp) {
+        Reset-PlanZoom $View
+        # a cached picture WPF cannot decode must not take the page (or the start-up) down
+        try { $View.Bmp = Read-PlanBitmapFile $ImagePath; $View.File = $ImagePath }
+        catch { Write-AppLog "plan picture ${ImagePath}: $_"; $View.Bmp = $null; $View.File = ""; $View.Box.Visibility = "Collapsed"; $View.Tools.Visibility = "Collapsed"; $View.Placeholder.Visibility = "Visible"; $View.W = 0; return }
+    }
     $W = [double]$View.Bmp.PixelWidth; $H = [double]$View.Bmp.PixelHeight
     $View.W = $W; $View.H = $H
     $Cv.Width = $W; $Cv.Height = $H

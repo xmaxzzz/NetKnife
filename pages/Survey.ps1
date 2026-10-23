@@ -87,9 +87,17 @@ $script:SvPlanBody = {
     foreach ($F in $Files) { $Q.Enqueue(@{ Type = "cqplan"; R = (Send-CollectorPlanImport $Ctx $Site $F) }) }
 }
 
+# outbox key "<url>|<site slug>" → token; an old all-sites token also serves the other sites of its directory
 function Get-SurveyConnMap {
     $M = @{}
-    foreach ($C in @(Get-SurveyConns)) { $Me = Get-SurveyMe $C; $M[(Get-SurveyConnKey $C)] = @{ Url = $C.Url; TokenEnc = $C.TokenEnc; Limits = $(if ($Me) { $Me['limits'] } else { @{} }) } }
+    $Cache = Read-CollectorSitesCache
+    foreach ($C in @(Get-SurveyConns)) {
+        $Me = Get-SurveyMe $C
+        $V = @{ Url = $C.Url; TokenEnc = $C.TokenEnc; Limits = $(if ($Me) { $Me['limits'] } else { @{} }) }
+        $D = $Cache[(Get-SurveyConnKey $C)]
+        foreach ($S in @($(if ($D) { $D['sites'] } else { @() }) | Where-Object { $_ })) { $K = "$($C.Url)|$($S['slug'])"; if (-not $M.ContainsKey($K)) { $M[$K] = $V.Clone() } }
+        $M[(Get-SurveyConnKey $C)] = $V.Clone()
+    }
     return $M
 }
 
@@ -284,7 +292,7 @@ function Update-SurveyQueue {
     if ($Sig -eq $script:SvQueueSig -and $script:SvQueueItems.Count -eq $Items.Count) { return }
     $script:SvQueueSig = $Sig
     $script:SvQueueItems.Clear()
-    foreach ($I in ($Items | Sort-Object { "$($_.State.QueuedAt)" } -Descending)) {
+    foreach ($I in ($Items | Sort-Object { ConvertTo-CollectorDate $_.State.QueuedAt } -Descending)) {
         $St = $I.State
         $Started = ConvertTo-CollectorDate $St.Started
         $Title = "$(if ($Started) { $Started.ToString('dd.MM HH:mm') }) · $($St.SiteName) · $(if ($St.SeriesLabel) { $St.SeriesLabel } else { $St.Series }) · $(Format-WalkTime ([double]$St.Duration))$(if ($St.Note) { " · $($St.Note)" })"
@@ -336,7 +344,7 @@ function Invoke-SurveyQueueAction {
         "open" { Start-Process (Get-SurveyReportUrl $St) }
         "drop" {
             if (-not (Show-Confirm "Убрать из очереди?" "Обход «$($St.WalkId)» не уйдёт в Helpdesk. Файл обхода в папке wifiplan останется." "Убрать" -Danger)) { return }
-            Remove-Item $Dir -Recurse -Force
+            try { Remove-Item $Dir -Recurse -Force } catch { Write-AppLog "outbox drop ${Key}: $_"; Show-Toast "Сейчас идёт отправка этого обхода — попробуйте через минуту" "warn"; return }
         }
         "new" { [void](Reset-OutboxAsNew $Dir); Start-SurveySend -Now }
         "retry" {
@@ -448,6 +456,7 @@ function Complete-SurveyPair {
     Save-SurveyConn $Rec
     $script:Settings.CollectorUrl = $R.Url
     $script:Settings.CollectorActive = Get-SurveyConnKey $Rec
+    $script:Settings.CollectorSel = $null   # the new object becomes the selected one
     Save-Settings
     Clear-OutboxPause $R.Site.slug
     if ($X) {
@@ -458,6 +467,7 @@ function Complete-SurveyPair {
     Show-Toast "Helpdesk: подключён объект «$($R.Site.name)»"
     Start-SurveyDirectory
     Update-SurveyQueue
+    Start-SurveySend -Now   # walks that waited for this object go now
 }
 
 function Start-SurveyCheck {
@@ -550,6 +560,8 @@ function Invoke-SurveyRecover {
     foreach ($P in @(Get-ChildItem $script:WplanDir -Filter "*.walk-*.json.partial")) {
         $Base = $P.FullName -replace '\.json\.partial$', ''
         if (Test-Path "$Base.json") { Remove-Item $P.FullName -Force; continue }
+        # a walk being stopped right now by the previous instance (Restart-App) is not «cut»
+        if ($P.LastWriteTime -gt [DateTime]::Now.AddSeconds(-90)) { continue }
         $Meta = $(try { Get-Content "$Base.meta.json" -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable } catch { $null })
         if (-not $Meta) { Write-AppLog "walk recover: нет $Base.meta.json"; continue }
         if (-not (Show-Confirm "Незавершённый обход" "Обход от $($P.LastWriteTime.ToString('dd.MM HH:mm')) на «$($Meta.SiteName)» не был остановлен (программа закрылась). Отправить незавершённый обход в Helpdesk?" "Отправить")) { continue }
