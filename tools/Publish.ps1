@@ -24,7 +24,7 @@ Set-Content -Path VERSION -Value $Version -Encoding ascii -NoNewline
 # zip: everything the app needs, nothing from dev/history
 $Out = Join-Path $env:TEMP "NetKnife.zip"
 if (Test-Path $Out) { Remove-Item $Out -Force }
-$Include = Get-ChildItem $Root -Force | Where-Object { $_.Name -notin @(".git", ".gitignore", "legacy", "tools", ".claude") -and $_.Name -notlike "*.bak*" }
+$Include = Get-ChildItem $Root -Force | Where-Object { $_.Name -notin @(".git", ".gitignore", "legacy", "tools", "tests", ".claude") -and $_.Name -notlike "*.bak*" }
 Compress-Archive -Path ($Include | ForEach-Object { $_.FullName }) -DestinationPath $Out -CompressionLevel Optimal
 "zip: $Out ({0:N1} МБ)" -f ((Get-Item $Out).Length / 1MB)
 
