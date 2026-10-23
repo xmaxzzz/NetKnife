@@ -279,6 +279,10 @@ function Get-SurveyStageText {
 
 function Update-SurveyQueue {
     $Items = @(Get-OutboxItems)
+    # the timer calls this every 10 s: rebuild the rows (and their buttons) only when something changed
+    $Sig = (@($Items | ForEach-Object { $S = $_.State; "$($_.Key)|$($S.State)|$($S.Step)|$(@($S.PartsDone).Count)|$($S.Stage)|$($S.NextAt)|$($S.LastError)|$($_.Paused)" }) -join "`n")
+    if ($Sig -eq $script:SvQueueSig -and $script:SvQueueItems.Count -eq $Items.Count) { return }
+    $script:SvQueueSig = $Sig
     $script:SvQueueItems.Clear()
     foreach ($I in ($Items | Sort-Object { "$($_.State.QueuedAt)" } -Descending)) {
         $St = $I.State
