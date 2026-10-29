@@ -172,7 +172,14 @@ function Start-NkApp {
     Start-Process -FilePath (Join-Path $env:WINDIR "System32\wscript.exe") -ArgumentList ('"' + (Join-Path $Path "launch.vbs") + '"')
 }
 
-# NetKnife writes its VERSION to update\started.txt right before showing the window
+# NetKnife writes its VERSION to update\started.txt right before showing the window (releases before the installer
+# do not — for them the start is not checked)
+function Test-NkReportsStart {
+    param([string]$Path)
+    $F = Join-Path $Path "lib\Update.ps1"
+    return ((Test-Path -LiteralPath $F) -and (Select-String -LiteralPath $F -SimpleMatch "Register-AppStarted" -Quiet))
+}
+
 function Wait-NkStarted {
     param([string]$Version, [int]$Seconds = $NkStartTimeout)
     $Marker = Join-Path (Get-NkUpdateDir) "started.txt"
@@ -312,7 +319,7 @@ function Install-NetKnife {
             Remove-Item -LiteralPath (Join-Path $Upd "started.txt") -Force -ErrorAction SilentlyContinue
             Write-NkLog "Запускаю…"
             Start-NkApp $Path
-            if (-not (Wait-NkStarted $New)) {
+            if ((Test-NkReportsStart $Path) -and -not (Wait-NkStarted $New)) {
                 Stop-NkApp -Path $Path -Force
                 if (-not $Was) { throw "NetKnife $New не запустился за $NkStartTimeout с" }
                 Restore-NkFiles -Path $Path -Backup $Backup

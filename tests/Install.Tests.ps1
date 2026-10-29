@@ -18,6 +18,7 @@ BeforeAll {
         Set-Content (Join-Path $Dir "NetKnife.ps1") "# NetKnife $Ver"
         Set-Content (Join-Path $Dir "launch.vbs") "' $Ver"
         Set-Content (Join-Path $Dir "lib\Core.ps1") "# core $Ver"
+        Set-Content (Join-Path $Dir "lib\Update.ps1") "function Register-AppStarted { }"
         foreach ($E in $Extra) { Set-Content (Join-Path $Dir $E) $Ver }
         $Zip = Join-Path $Base "NetKnife-$Ver.zip"
         Compress-Archive -Path (Join-Path $Dir "*") -DestinationPath $Zip -Force
@@ -136,6 +137,19 @@ Describe "install.ps1" {
         Test-Path (Join-Path $Dest "install.ps1") | Should -BeFalse
         Should -Invoke Start-NkApp -Times 3   # first install, the failed new one, the restored old one
         (Read-Result).Ok | Should -BeFalse
+    }
+
+    It "старый релиз без метки запуска — запуск не проверяется, программа не закрывается" {
+        $Old = New-FakePackage "2026.10.15.36"
+        Remove-Item (Join-Path $Old.Dir "lib\Update.ps1")
+        Remove-Item $Old.Zip; Compress-Archive -Path (Join-Path $Old.Dir "*") -DestinationPath $Old.Zip -Force
+        Set-FakeRelease ([pscustomobject]@{ Zip = $Old.Zip; Sha = (Get-FileHash -Algorithm SHA256 $Old.Zip).Hash.ToLower(); Ver = $Old.Ver })
+        Mock Start-NkApp { }
+        Mock Stop-Process { }
+        Install-NetKnife -Path $Dest -Quiet
+        Get-NkVersion $Dest | Should -Be "2026.10.15.36"
+        Should -Invoke Stop-Process -Times 0
+        (Read-Result).Ok | Should -BeTrue
     }
 
     It "битый архив (SHA256 сходится) → ошибка распаковки, установленная версия не тронута" {
