@@ -2,7 +2,7 @@
 
 $script:SshDir     = Join-Path $env:USERPROFILE ".ssh"
 $script:ConfigPath = Join-Path $script:SshDir "config"
-# engine script ships inside the app folder; one level up (D:\SCRIPTS\ssh-key.ps1) is the legacy location
+# engine script ships inside the app folder; one level up (next to the app folder) is the legacy location
 $script:Engine     = Join-Path $script:AppDir "ssh-key.ps1"
 if (-not (Test-Path $script:Engine)) { $script:Engine = Join-Path (Split-Path $script:AppDir -Parent) "ssh-key.ps1" }
 $script:Pwsh       = (Get-Process -Id $PID).Path

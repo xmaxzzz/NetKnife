@@ -9,6 +9,20 @@
 - **Wi-Fi обход для Helpdesk** — см. ниже.
 - Трей, глобальный хоткей `Ctrl+Alt+N`, автообновление с GitHub Releases.
 
+## Установка
+
+1. PowerShell 7: `winget install --id Microsoft.PowerShell -e`.
+2. Скачать `NetKnife.zip` из [releases/latest](https://github.com/xmaxzzz/NetKnife/releases/latest) и распаковать
+   в любую папку (пробелы и кириллица в пути — можно).
+3. Снять пометку «скачано из интернета», иначе Windows не даст запустить скрипты:
+   ```
+   Get-ChildItem "<папка>" -Recurse | Unblock-File
+   ```
+4. Запуск — двойной клик по `launch.vbs` (без консоли). Если PowerShell 7 не найден, он скажет, что поставить.
+
+Программа ничего не пишет в свою папку: настройки, движки и очередь обходов — в `%APPDATA%\NetKnife\`.
+Обновление — из самой программы: «Настройки → Обновить» (скачивает релиз с GitHub и заменяет файлы в той же папке).
+
 ## Wi-Fi обход (сборщик для Helpdesk)
 
 NetKnife на вкладке «Wi-Fi обход» только **собирает** обход и отправляет его в Helpdesk
@@ -48,14 +62,14 @@ NetKnife на вкладке «Wi-Fi обход» только **собирае�
 pwsh -c "Invoke-Pester -Path tests"
 ```
 Pester 5. `tests/Collector.Tests.ps1` — клиент протокола против сервера в памяти; `tests/App.Tests.ps1` — целостность
-(удалённые модули, разбор скриптов, имена элементов `Main.xaml`). Работают и в pwsh на Linux (DPAPI — только Windows).
+(удалённые модули, разбор скриптов, имена элементов `Main.xaml`); `tests/Portable.Tests.ps1` — нет жёстких путей установки. Работают и в pwsh на Linux (DPAPI — только Windows).
 
 ## Запуск
 
 ```
 pwsh -STA -File NetKnife.ps1
 ```
-или `launch.vbs` (без консоли). Нужен PowerShell 7. Движки (xray, mihomo, ConEmu) скачиваются с их официальных GitHub-релизов в `%APPDATA%\NetKnife\`.
+или `launch.vbs` (без консоли; путь к `NetKnife.ps1` берёт из своей папки). Нужен PowerShell 7. Движки (xray, mihomo, ConEmu) скачиваются с их официальных GitHub-релизов в `%APPDATA%\NetKnife\`.
 
 ## Выпуск релиза
 
