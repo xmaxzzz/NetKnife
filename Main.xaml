@@ -1147,7 +1147,7 @@
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                     <StackPanel VerticalAlignment="Center">
                                         <WrapPanel>
-                                            <TextBlock Text="VLESS через xray (ядро Happ), Hysteria2 и mieru через mihomo" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                            <TextBlock Text="VLESS через xray (ядро Happ), Hysteria2 и mieru через mihomo, NaïveProxy через naive" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center" Margin="0,0,10,0"/>
                                             <Border x:Name="VpnStatePill" Style="{StaticResource Pill}"><TextBlock x:Name="VpnState" FontSize="12"/></Border>
                                         </WrapPanel>
                                         <TextBlock Text="Профиль поднимается как локальный SOCKS5/HTTP-прокси и ставится системным прокси Windows (браузеры, .NET, большинство приложений). Локальные сети идут мимо. Режим TUN (весь трафик) — следующим шагом." Foreground="{StaticResource Sub}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0"/>

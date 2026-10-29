@@ -1,5 +1,6 @@
 # Pester 5: pages\Vpn.ps1 without WPF — share-link parsing (vless/hy2/mieru/naive), mihomo YAML for mieru,
-# engine choice and minimum versions, pinned engine downloads with SHA256 check.
+# NaïveProxy chain (naive.json + mihomo socks5), log masking, inner port, engine choice and minimum versions,
+# pinned engine downloads with SHA256 check.
 
 BeforeAll {
     $script:Root = Split-Path $PSScriptRoot -Parent
@@ -95,19 +96,16 @@ Describe "naive+https:// и naive+quic://" {
         ConvertFrom-ProxyLink $L | Should -BeNullOrEmpty
         Get-ProxyLinkError $L | Should -Match ([regex]::Escape($Why))
     }
-    It "движка нет, mihomo-конфиг не строится" {
-        $P = ConvertFrom-ProxyLink "naive+https://a:b@h"
-        Get-VpnEngineFor $P.Type | Should -BeNullOrEmpty
-        { New-MihomoConfig $P 2080 } | Should -Throw "*не умеет*"
+    It "mihomo-конфиг без внутреннего порта не строится" {
+        { New-MihomoConfig (ConvertFrom-ProxyLink "naive+https://a:b@h") 2080 } | Should -Throw "*внутренний порт*"
     }
 }
 
 Describe "Get-VpnEngineFor" {
     It "<T> → <E>" -ForEach @(
-        @{ T = "vless"; E = "xray" }, @{ T = "hysteria2"; E = "mihomo" }, @{ T = "mieru"; E = "mihomo" }
+        @{ T = "vless"; E = "xray" }, @{ T = "hysteria2"; E = "mihomo" }, @{ T = "mieru"; E = "mihomo" }, @{ T = "naive"; E = "naive" }
     ) { Get-VpnEngineFor $T | Should -Be $E }
-    It "naive и неизвестное — нет движка" {
-        Get-VpnEngineFor "naive" | Should -BeNullOrEmpty
+    It "неизвестное — нет движка" {
         Get-VpnEngineFor "trojan" | Should -BeNullOrEmpty
     }
 }
@@ -180,9 +178,9 @@ Describe "минимальная версия mihomo для mieru" {
 }
 
 Describe "закреплённые движки" {
-    It "<_>: тег, ассеты amd64/arm64 с размером и SHA256, ссылка на тег, не latest" -ForEach @("xray", "mihomo") {
+    It "<_>: тег, ассеты amd64/arm64 с размером и SHA256, ссылка на тег, не latest" -ForEach @("xray", "mihomo", "naive") {
         $E = $script:VpnEngines[$_]
-        $E.Tag | Should -Match '^v\d+\.\d+\.\d+$'
+        $E.Tag | Should -Match '^v\d+\.\d+\.\d+(\.\d+)?(-\d+)?$'
         foreach ($Arch in "AMD64", "ARM64") {
             $A = Get-VpnEngineAsset $_ $Arch
             $A.Sha256 | Should -Match '^[0-9a-f]{64}$'
@@ -200,6 +198,89 @@ Describe "закреплённые движки" {
     }
     It "в Vpn.ps1 нет releases/latest" {
         [IO.File]::ReadAllText((Join-Path $Root "pages\Vpn.ps1")) | Should -Not -Match "releases/latest" -Because "скачивание только по закреплённому тегу"
+    }
+}
+
+Describe "NaïveProxy: naive.json + mihomo" {
+    BeforeAll { $script:NaiveLink = "naive+https://alice:S3cr%3At%40pw@np.example.com:8443#Naive" }
+    It "снапшот naive.json: SOCKS на внутреннем порту, пароль в URI экранирован" {
+        New-NaiveConfig (ConvertFrom-ProxyLink $NaiveLink) 2083 | Should -Be (@(
+            '{'
+            '  "listen": "socks://127.0.0.1:2083",'
+            '  "proxy": "https://alice:S3cr%3At%40pw@np.example.com:8443",'
+            '  "log": ""'
+            '}'
+        ) -join [Environment]::NewLine)
+    }
+    It "quic и IPv6-сервер" {
+        $J = New-NaiveConfig (ConvertFrom-ProxyLink "naive+quic://bob:pw@[2001:db8::5]") 2090 | ConvertFrom-Json
+        $J.proxy | Should -Be "quic://bob:pw@[2001:db8::5]:443"
+    }
+    It "-Mask прячет пароль" {
+        $T = New-NaiveConfig (ConvertFrom-ProxyLink $NaiveLink) 2083 -Mask
+        $T | Should -Match '"https://alice:\*\*\*@np\.example\.com:8443"'
+        $T | Should -Not -Match "S3cr"
+    }
+    It "снапшот mihomo: socks5 → 127.0.0.1:внутренний порт, без UDP, сервера и пароля" {
+        $Y = New-MihomoConfig (ConvertFrom-ProxyLink $NaiveLink) 2080 -InnerPort 2083
+        $Y.Substring($Y.IndexOf("proxies:")).TrimEnd() | Should -Be (@(
+            "proxies:"
+            "  - name: proxy"
+            "    type: socks5"
+            "    server: '127.0.0.1'"
+            "    port: 2083"
+            "    udp: false"
+            "rules:"
+            "  - MATCH,proxy"
+        ) -join "`n")
+        $Y | Should -Match "(?m)^mixed-port: 2080$"
+    }
+    It "пароль есть только в naive.json: не в mihomo, не в описании, не в ошибках" {
+        $Pw = "S3cr:t@pw"; $PwEsc = "S3cr%3At%40pw"
+        $P = ConvertFrom-ProxyLink $NaiveLink
+        $Texts = @(
+            (New-MihomoConfig $P 2080 -InnerPort 2083)
+            (New-NaiveConfig $P 2083 -Mask)
+            (Get-VpnExtra $P)
+            (Get-ProxyLinkError "naive+https://alice:$PwEsc@np.example.com:0")
+            (Get-ProxyLinkError "naive+https://alice:$PwEsc@")
+            $(try { New-MihomoConfig $P 2080 } catch { "$_" })
+            $(try { New-XrayConfig $P 2080 } catch { "$_" })
+            (Hide-ProxySecret "proxy https://alice:$PwEsc@np.example.com:8443 failed")
+        )
+        foreach ($T in $Texts) { $T | Should -Not -Match ([regex]::Escape($Pw)); $T | Should -Not -Match ([regex]::Escape($PwEsc)) }
+        New-NaiveConfig $P 2083 | Should -Match ([regex]::Escape($PwEsc))
+    }
+}
+
+Describe "маскирование логина и пароля в логе движка" {
+    It "<In>" -ForEach @(
+        @{ In = "ERROR: proxy https://alice:pw@np.example.com:443 refused"; Out = "ERROR: proxy https://***@np.example.com:443 refused" }
+        @{ In = "connect quic://u%3Ax:p%40w@[2001:db8::1]:443"; Out = "connect quic://***@[2001:db8::1]:443" }
+        @{ In = "socks://127.0.0.1:2083 listening"; Out = "socks://127.0.0.1:2083 listening" }
+        @{ In = "auth alice:pw@np.example.com"; Out = "auth ***@np.example.com" }
+        @{ In = "mail to ops@example.com"; Out = "mail to ops@example.com" }
+        @{ In = "time=12:00:01 level=info msg=ok"; Out = "time=12:00:01 level=info msg=ok" }
+    ) { Hide-ProxySecret $In | Should -Be $Out }
+}
+
+Describe "внутренний порт naive" {
+    BeforeAll { function Test-LocalPortBusy { param([int]$Port) return ($Port -in $script:Busy) } }
+    It "первый свободный — Port+3, не Port и не Port+2" {
+        $script:Busy = @()
+        Get-VpnInnerPort 2080 | Should -Be 2083
+    }
+    It "занятые пропускаются, Port/Port+1/Port+2 не берутся даже свободными" {
+        $script:Busy = @(2083, 2084)
+        $R = Get-VpnInnerPort 2080
+        $R | Should -Be 2085
+        $R | Should -Not -BeIn @(2080, 2081, 2082)
+    }
+    It "всё занято или край диапазона — 0" {
+        $script:Busy = 2083..2100
+        Get-VpnInnerPort 2080 | Should -Be 0
+        $script:Busy = @()
+        Get-VpnInnerPort 65533 | Should -Be 0
     }
 }
 

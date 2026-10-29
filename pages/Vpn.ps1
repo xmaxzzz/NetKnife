@@ -1,7 +1,8 @@
-# Page: VPN. Profiles are vless:// / hysteria2:// share links (same format Happ/v2rayN use). One sing-box
-# process runs the selected profile as a local mixed (SOCKS5+HTTP) proxy and NetKnife sets it as the
-# Windows system proxy. sing-box is downloaded from the official GitHub release after confirmation.
-# TUN mode (whole-system, needs admin + wintun) is a later step; the config builder already takes -Mode.
+# Page: VPN. Profiles are vless:// / hysteria2:// / mierus:// / naive+https:// share links. One engine process
+# (xray or mihomo; for NaïveProxy naive.exe + mihomo in front of it) runs the selected profile as a local
+# mixed (SOCKS5+HTTP) proxy and NetKnife sets it as the Windows system proxy. Engines are downloaded from
+# pinned official GitHub releases (SHA256 checked) after confirmation.
+# TUN mode (whole-system, needs admin + wintun) is a later step; the mihomo config builder already takes -Mode.
 
 $script:VpnDir = Join-Path $script:DataDir "vpn"      # engine exes + generated configs + vpn.log
 $script:VpnPidFile = Join-Path $script:DataDir "vpn.pid"
@@ -9,7 +10,7 @@ $script:VpnItems = New-Object System.Collections.ObjectModel.ObservableCollectio
 $script:Vpn = $null              # @{ P; Id; Started; Lines; ErrTask; Out; Error; Notified; Port }
 $script:VpnPumpSw = [System.Diagnostics.Stopwatch]::StartNew()
 $script:VpnWatchTick = 0
-$script:VpnPending = $null       # profile id to connect once sing-box is installed
+$script:VpnPending = $null       # profile id to connect once its engine is installed
 $script:VpnInstall = $null       # @{ Version; Url; Size } while a download is offered/running
 
 if (-not ("NetKnife.WinInet" -as [type])) {
@@ -150,78 +151,11 @@ function Get-VpnExtra {
         if ($Q.'handshake-mode' -eq "HANDSHAKE_NO_WAIT") { $Parts += "0-RTT" }
         return ($Parts -join " · ")
     }
-    if ($P.Type -eq "naive") { return "$($P.Proto) · движка пока нет" }
+    if ($P.Type -eq "naive") { return "$($P.Proto) · naive → mihomo" }
     $Parts = @("udp/quic")
     if ($Q.obfs) { $Parts += "obfs" }
     if ($Q.insecure -eq "1") { $Parts += "insecure" }
     return ($Parts -join " · ")
-}
-
-# Throws with a readable message when the link needs something sing-box can't do.
-function New-SingBoxConfig {
-    param($P, [int]$Port, [string]$Mode = "proxy")
-    $Q = $P.Query
-    $Out = [ordered]@{ type = $P.Type; tag = "proxy"; server = $P.Server; server_port = $P.Port }
-
-    if ($P.Type -eq "vless") {
-        $Out.uuid = $P.Auth
-        if ($Q.flow) { $Out.flow = $Q.flow }
-        $Sec = "$($Q.security)".ToLower()
-        if ($Sec -in @("tls", "reality")) {
-            $Tls = [ordered]@{ enabled = $true }
-            if ($Q.sni) { $Tls.server_name = $Q.sni } elseif ($Q.host) { $Tls.server_name = $Q.host }
-            if ($Q.allowInsecure -eq "1" -or $Q.insecure -eq "1") { $Tls.insecure = $true }
-            if ($Q.alpn) { $Tls.alpn = @($Q.alpn -split ',' | Where-Object { $_ }) }
-            $Tls.utls = [ordered]@{ enabled = $true; fingerprint = $(if ($Q.fp) { $Q.fp } else { "chrome" }) }
-            if ($Sec -eq "reality") {
-                if (-not $Q.pbk) { throw "reality без pbk (public key) — ссылка неполная" }
-                $Tls.reality = [ordered]@{ enabled = $true; public_key = $Q.pbk; short_id = "$($Q.sid)" }
-            }
-            $Out.tls = $Tls
-        }
-        $Net = $(if ($Q.type) { "$($Q.type)".ToLower() } else { "tcp" })
-        switch ($Net) {
-            "tcp"  { }
-            "ws"   {
-                $T = [ordered]@{ type = "ws"; path = $(if ($Q.path) { $Q.path } else { "/" }) }
-                if ($Q.host) { $T.headers = [ordered]@{ Host = $Q.host } }
-                $Out.transport = $T
-            }
-            "grpc" { $Out.transport = [ordered]@{ type = "grpc"; service_name = "$($Q.serviceName)" } }
-            "httpupgrade" {
-                $T = [ordered]@{ type = "httpupgrade"; path = $(if ($Q.path) { $Q.path } else { "/" }) }
-                if ($Q.host) { $T.host = $Q.host }
-                $Out.transport = $T
-            }
-            "h2" { $Out.transport = [ordered]@{ type = "http"; path = $(if ($Q.path) { $Q.path } else { "/" }) } }
-            default { throw "транспорт «$Net» sing-box не умеет (xhttp/splithttp — только xray)" }
-        }
-    } else {
-        $Out.password = $P.Auth
-        $Tls = [ordered]@{ enabled = $true; alpn = @("h3") }
-        if ($Q.sni) { $Tls.server_name = $Q.sni }
-        if ($Q.insecure -eq "1") { $Tls.insecure = $true }
-        $Out.tls = $Tls
-        if ("$($Q.obfs)" -eq "salamander") { $Out.obfs = [ordered]@{ type = "salamander"; password = "$($Q.'obfs-password')" } }
-        if ($Q.upmbps -match '^\d+$') { $Out.up_mbps = [int]$Q.upmbps }
-        if ($Q.downmbps -match '^\d+$') { $Out.down_mbps = [int]$Q.downmbps }
-    }
-
-    $Inbound = if ($Mode -eq "tun") {
-        [ordered]@{ type = "tun"; tag = "in"; address = @("172.19.0.1/30"); auto_route = $true; strict_route = $true; stack = "system" }
-    } else {
-        [ordered]@{ type = "mixed"; tag = "in"; listen = "127.0.0.1"; listen_port = $Port }
-    }
-    $Cfg = [ordered]@{
-        log = [ordered]@{ level = "info"; timestamp = $true }
-        inbounds = @($Inbound)
-        outbounds = @($Out, [ordered]@{ type = "direct"; tag = "direct" })
-        route = [ordered]@{
-            rules = @([ordered]@{ ip_is_private = $true; outbound = "direct" })
-            final = "proxy"; auto_detect_interface = $true
-        }
-    }
-    return ($Cfg | ConvertTo-Json -Depth 8)
 }
 
 # ---------------------------------------------------------------- system proxy
@@ -293,7 +227,7 @@ function Repair-SystemProxy {
 # Engine processes started from our folder (also orphans from a crashed run): kill by command line
 function Stop-VpnEngineProcesses {
     try {
-        $Mine = Get-CimInstance Win32_Process -Filter "Name = 'xray.exe' OR Name = 'mihomo.exe' OR Name = 'koala-mihomo.exe'" -ErrorAction SilentlyContinue |
+        $Mine = Get-CimInstance Win32_Process -Filter "Name = 'xray.exe' OR Name = 'mihomo.exe' OR Name = 'koala-mihomo.exe' OR Name = 'naive.exe'" -ErrorAction SilentlyContinue |
             Where-Object { "$($_.CommandLine)" -like "*$($script:VpnDir)*" }
         foreach ($P in $Mine) { try { Stop-Process -Id $P.ProcessId -Force -ErrorAction Stop; Write-AppLog "vpn: killed engine pid $($P.ProcessId)" } catch { } }
     } catch { }
@@ -302,19 +236,24 @@ function Stop-VpnEngineProcesses {
 # ---------------------------------------------------------------- engines
 # VLESS → xray-core (the only core that follows current REALITY; it's also what Happ ships — reused when found).
 # Hysteria2, mieru → mihomo (xray has neither). Each is one exe in %APPDATA%\NetKnife\vpn or a known local install.
-# NaïveProxy: links are parsed, but no engine runs them yet (mihomo has no naive outbound).
+# NaïveProxy → naive.exe (mihomo has no naive outbound) behind mihomo, so the port, system proxy and stats stay the same.
 # Downloads are pinned: Tag + exact asset + Size + Sha256 from the official GitHub release (the API "digest" field;
 # for xray it also matches the release's .dgst file). Bumping a version = updating all four here.
 
 $script:VpnEngines = @{
-    xray   = @{ Title = "xray";   Exe = "xray.exe";   Repo = "XTLS/Xray-core";   Tag = "v26.10.29"; ExeMatch = "xray.exe";    VerArgs = "version"; Cfg = "xray.json"
-                Asset    = @{ Name = "Xray-windows-64.zip";        Size = 16722699; Sha256 = "fce33e81cccf50e7aab572b175519a50b5e0f9d2f5c8d1ed73012ea5c9ad4d58" }
-                AssetArm = @{ Name = "Xray-windows-arm64-v8a.zip"; Size = 15041699; Sha256 = "b5314598249b2da55135e0d875adb653aadf926fa1bca73d34fdce78600f4204" }
+    xray   = @{ Title = "xray";   Exe = "xray.exe";   Repo = "XTLS/Xray-core";   Tag = "v26.10.21"; ExeMatch = "xray.exe";    VerArgs = "version"; Cfg = "xray.json"
+                Asset    = @{ Name = "Xray-windows-64.zip";        Size = 15029603; Sha256 = "fc58c39ee2f2717b4c54d28d374362389e5319b20ae44aea76ea45a5243ec827" }
+                AssetArm = @{ Name = "Xray-windows-arm64-v8a.zip"; Size = 13355256; Sha256 = "bb44af3380c9975f951ce7645c04d56ab600040e68f23974a2806e08e0a3f872" }
                 Fallback = @("$env:ProgramFiles\FlyFrogLLC\Happ\core\xray.exe") }
     mihomo = @{ Title = "mihomo"; Exe = "mihomo.exe"; Repo = "MetaCubeX/mihomo"; Tag = "v1.19.33"; ExeMatch = "mihomo*.exe"; VerArgs = "-v";      Cfg = "mihomo.yaml"
                 Asset    = @{ Name = "mihomo-windows-amd64-compatible-v1.19.33.zip"; Size = 22543546; Sha256 = "7aaf636a4f2172dcd8ec34ac4f52797b059195e5afd6409508c963e545f8864d" }
                 AssetArm = @{ Name = "mihomo-windows-arm64-v1.19.33.zip";            Size = 20212418; Sha256 = "a2a26869a14634c49f3fbcecc593b498ed8591fbdd7616b24475b3d60b148da3" }
                 Fallback = @("$env:ProgramFiles\Koala Clash\koala-mihomo.exe") }
+    # NaïveProxy client: listens SOCKS on an inner port, mihomo chains to it (socks5 outbound) — see Start-Vpn
+    naive  = @{ Title = "naive";  Exe = "naive.exe";  Repo = "klzgrad/naiveproxy"; Tag = "v154.0.8037.49-5"; ExeMatch = "naive.exe"; VerArgs = "--version"; Cfg = "naive.json"
+                Asset    = @{ Name = "naiveproxy-v154.0.8037.49-5-win-x64.zip";   Size = 5273913; Sha256 = "36d14c117ed052c8d04d10a30db083423ad4e423c012c2ef2ca7286ec06afbbc" }
+                AssetArm = @{ Name = "naiveproxy-v154.0.8037.49-5-win-arm64.zip"; Size = 4599867; Sha256 = "68a7378ce6414df325f8d9d38fd8792906d63a601ae0b2f1c76d263bd917af5d" }
+                Fallback = @() }
 }
 
 # Enum names mihomo accepts for mieru (mieru appctlpb MultiplexingLevel / HandshakeMode)
@@ -329,8 +268,9 @@ function Get-VpnEngineFor {
         "vless"     { return "xray" }
         "hysteria2" { return "mihomo" }
         "mieru"     { return "mihomo" }
+        "naive"     { return "naive" }
     }
-    return $null   # naive and anything unknown: no engine
+    return $null
 }
 
 # Oldest engine version that runs this profile (mihomo release notes / adapter/outbound/mieru.go per tag); "" = any.
@@ -452,14 +392,24 @@ function ConvertTo-YamlStr { param([string]$S) return "'" + ($S -replace "'", "'
 
 # Throws with a readable message when the link needs something mihomo can't do.
 function New-MihomoConfig {
-    param($P, [int]$Port, [string]$Mode = "proxy")
+    param($P, [int]$Port, [string]$Mode = "proxy", [int]$InnerPort = 0)
     $Q = $P.Query
     $Y = [System.Text.StringBuilder]::new()
     [void]$Y.AppendLine("  - name: proxy")
-    [void]$Y.AppendLine("    type: $($P.Type)")
-    [void]$Y.AppendLine("    server: $(ConvertTo-YamlStr $P.Server)")
-    if ($P.Type -ne "mieru") { [void]$Y.AppendLine("    port: $($P.Port)") }   # mieru: port or port-range, below
-    [void]$Y.AppendLine("    udp: true")
+    if ($P.Type -eq "naive") {
+        # naive.exe holds the server and the password and listens SOCKS on 127.0.0.1:InnerPort; mihomo only chains to it.
+        # naive's SOCKS has no UDP.
+        if ($InnerPort -lt 1) { throw "naive: не задан внутренний порт" }
+        [void]$Y.AppendLine("    type: socks5")
+        [void]$Y.AppendLine("    server: '127.0.0.1'")
+        [void]$Y.AppendLine("    port: $InnerPort")
+        [void]$Y.AppendLine("    udp: false")
+    } else {
+        [void]$Y.AppendLine("    type: $($P.Type)")
+        [void]$Y.AppendLine("    server: $(ConvertTo-YamlStr $P.Server)")
+        if ($P.Type -ne "mieru") { [void]$Y.AppendLine("    port: $($P.Port)") }   # mieru: port or port-range, below
+        [void]$Y.AppendLine("    udp: true")
+    }
 
     if ($P.Type -eq "vless") {
         [void]$Y.AppendLine("    uuid: $(ConvertTo-YamlStr $P.Auth)")
@@ -533,6 +483,7 @@ function New-MihomoConfig {
         }
         if ($Q.upmbps -match '^\d+$') { [void]$Y.AppendLine("    up: $($Q.upmbps)") }
         if ($Q.downmbps -match '^\d+$') { [void]$Y.AppendLine("    down: $($Q.downmbps)") }
+    } elseif ($P.Type -eq "naive") {
     } else {
         throw "$($P.Type): mihomo этот протокол не умеет"
     }
@@ -561,6 +512,41 @@ function New-MihomoConfig {
         "  - MATCH,proxy"
     )
     return (($Head + $Tail) -join "`n") + "`n"
+}
+
+# ---------------------------------------------------------------- naive config (JSON)
+
+# naive.exe reads server + login from this file, so the password never shows up in a process command line.
+# -Mask gives the same text with the password replaced, for the "show config" dialog.
+function New-NaiveConfig {
+    param($P, [int]$InnerPort, [switch]$Mask)
+    if ($P.Type -ne "naive") { throw "naive.json только для NaïveProxy" }
+    $Srv = $(if ($P.Server -match ':') { "[$($P.Server)]" } else { $P.Server })
+    $Pass = $(if ($Mask) { "***" } else { [Uri]::EscapeDataString($P.Password) })
+    $Cfg = [ordered]@{
+        listen = "socks://127.0.0.1:$InnerPort"
+        proxy  = "$($P.Proto)://$([Uri]::EscapeDataString($P.User)):$Pass@${Srv}:$($P.Port)"
+        log    = ""   # "" = to the console, which NetKnife reads (masked) into the VPN log
+    }
+    return ($Cfg | ConvertTo-Json)
+}
+
+# Port for naive's SOCKS listener: next to the main one, but never Port (mihomo), Port+1/Port+2 (xray socks / stats API)
+function Get-VpnInnerPort {
+    param([int]$Port)
+    for ($I = 3; $I -le 20; $I++) {
+        $C = $Port + $I
+        if ($C -gt 65535) { break }
+        if (-not (Test-LocalPortBusy $C)) { return $C }
+    }
+    return 0
+}
+
+# Engine log line → safe to show and save: "scheme://user:pass@" and bare "user:pass@" become "***@"
+function Hide-ProxySecret {
+    param([string]$Line)
+    $L = $Line -replace '(?i)(\b[a-z][a-z0-9+.-]*://)[^\s/@"'']+@', '$1***@'
+    return ($L -replace '(?<![\w*])[^\s/@:"''=]+:[^\s/@"'']+@(?=[\w\[])', '***@')
 }
 
 # ---------------------------------------------------------------- engine download
@@ -628,32 +614,87 @@ function Start-VpnInstall {
 
 # ---------------------------------------------------------------- run / stop
 
-function Test-VpnRunning { return [bool]($script:Vpn -and $script:Vpn.P -and -not $script:Vpn.P.HasExited) }
+# Running = the main engine is alive, and so is naive.exe behind it when the profile is NaïveProxy
+function Test-VpnRunning {
+    if (-not ($script:Vpn -and $script:Vpn.P -and -not $script:Vpn.P.HasExited)) { return $false }
+    if ($script:Vpn.Aux -and $script:Vpn.Aux.P.HasExited) { return $false }
+    return $true
+}
 
 function Get-VpnActiveId { if (Test-VpnRunning) { return $script:Vpn.Id }; return $null }
 
+# one PID per line: the main engine, then naive.exe when there is one
 function Save-VpnPid {
     try {
         if (-not (Test-Path $script:DataDir)) { New-Item -ItemType Directory -Path $script:DataDir | Out-Null }
-        if (Test-VpnRunning) { [IO.File]::WriteAllText($script:VpnPidFile, "$($script:Vpn.P.Id)") } elseif (Test-Path $script:VpnPidFile) { [IO.File]::Delete($script:VpnPidFile) }
+        $Ids = @()
+        if ($script:Vpn -and $script:Vpn.P -and -not $script:Vpn.P.HasExited) { $Ids += $script:Vpn.P.Id }
+        if ($script:Vpn -and $script:Vpn.Aux -and -not $script:Vpn.Aux.P.HasExited) { $Ids += $script:Vpn.Aux.P.Id }
+        if ($Ids) { [IO.File]::WriteAllText($script:VpnPidFile, ($Ids -join "`n")) } elseif (Test-Path $script:VpnPidFile) { [IO.File]::Delete($script:VpnPidFile) }
     } catch { }
 }
 
-# after a hard crash: kill the orphaned sing-box and put the system proxy back
+# after a hard crash: kill the orphaned engines and put the system proxy back
 function Remove-StaleVpn {
     if (Test-Path $script:VpnPidFile) {
-        $Line = (Get-Content $script:VpnPidFile -ErrorAction SilentlyContinue | Select-Object -First 1)
-        if ($Line -match '^\d+$') {
+        foreach ($Line in @(Get-Content $script:VpnPidFile -ErrorAction SilentlyContinue)) {
+            if ($Line -notmatch '^\d+$') { continue }
             $P = Get-Process -Id ([int]$Line) -ErrorAction SilentlyContinue
-            if ($P -and $P.ProcessName -in @("xray", "mihomo", "sing-box")) { try { $P.Kill(); Write-AppLog "stale $($P.ProcessName) killed: $Line" } catch { } }
+            if ($P -and $P.ProcessName -in @("xray", "mihomo", "koala-mihomo", "naive")) { try { $P.Kill(); Write-AppLog "stale $($P.ProcessName) killed: $Line" } catch { } }
         }
         try { [IO.File]::Delete($script:VpnPidFile) } catch { }
     }
+    Remove-NaiveConfig
     if ($script:Settings.VpnProxySet) {
         Write-AppLog "vpn: system proxy was left on — restoring"
         try { Set-SystemProxy "" } catch { }
     }
     [void](Repair-SystemProxy "startup")
+}
+
+# naive.json holds the password: it lives only while naive.exe starts up
+function Remove-NaiveConfig {
+    try { $F = Join-Path $script:VpnDir $script:VpnEngines.naive.Cfg; if (Test-Path $F) { [IO.File]::Delete($F) } } catch { }
+}
+
+# Engine process with stdout/stderr redirected (read line by line in Invoke-VpnPump), tied to our job object
+function Start-VpnProcess {
+    param([string]$Exe, [string]$CmdArgs)
+    $Psi = New-Object System.Diagnostics.ProcessStartInfo $Exe
+    $Psi.Arguments = $CmdArgs
+    $Psi.WorkingDirectory = $script:VpnDir
+    $Psi.UseShellExecute = $false; $Psi.CreateNoWindow = $true
+    $Psi.RedirectStandardError = $true; $Psi.RedirectStandardOutput = $true
+    $Proc = [System.Diagnostics.Process]::Start($Psi)
+    Add-ProcessToJob $Proc
+    return $Proc
+}
+
+# Wait until something accepts TCP on 127.0.0.1:Port; "" when it does, else why not
+function Wait-VpnListen {
+    param($Proc, [int]$Port, [int]$TimeoutMs = 5000)
+    $Sw = [System.Diagnostics.Stopwatch]::StartNew()
+    while ($Sw.ElapsedMilliseconds -lt $TimeoutMs) {
+        if ($Proc.HasExited) { return "завершился сразу, код $($Proc.ExitCode)" }
+        $T = New-Object System.Net.Sockets.TcpClient
+        try {
+            $A = $T.BeginConnect("127.0.0.1", $Port, $null, $null)
+            if ($A.AsyncWaitHandle.WaitOne(250) -and $T.Connected) { return "" }
+        } catch { } finally { $T.Close() }
+        Start-Sleep -Milliseconds 100
+    }
+    return "не начал слушать 127.0.0.1:$Port за $([int]($TimeoutMs / 1000)) с"
+}
+
+# Everything an engine printed so far (non-blocking), masked — for an error shown before the pump takes over
+function Read-VpnProcessOutput {
+    param($Proc)
+    $Out = @()
+    try {
+        if (-not $Proc.HasExited) { $Proc.Kill($true); [void]$Proc.WaitForExit(2000) }
+        $Out = @(("$($Proc.StandardOutput.ReadToEnd())`n$($Proc.StandardError.ReadToEnd())" -split "`r?`n") | ForEach-Object { Hide-ProxySecret ($_ -replace "\x1b\[[0-9;]*m", "").Trim() } | Where-Object { $_ })
+    } catch { }
+    return $Out
 }
 
 function Start-Vpn {
@@ -662,16 +703,25 @@ function Start-Vpn {
 
     $P = ConvertFrom-ProxyLink $Pf.Link
     if (-not $P) { Show-Toast "Ссылка профиля «$($Pf.Name)» не разбирается" "fail"; return }
-    $Engine = Get-VpnEngineFor $P.Type
-    if (-not $Engine) { Show-Toast "«$($Pf.Name)»: $($P.Type) пока не поддерживается — нет движка" "warn"; return }
+    $Kind = Get-VpnEngineFor $P.Type
+    if (-not $Kind) { Show-Toast "«$($Pf.Name)»: $($P.Type) не поддерживается — нет движка" "warn"; return }
+    # NaïveProxy = naive.exe (holds the server) + mihomo in front of it (port, system proxy, stats)
+    $Engine = $(if ($Kind -eq "naive") { "mihomo" } else { $Kind })
+    foreach ($Need in @($Kind, $Engine) | Select-Object -Unique) {
+        if (-not (Get-VpnEngineExe $Need)) { $script:VpnPending = $Pf.Id; Start-VpnInstall $Need; return }   # Start-Vpn runs again once it's in
+    }
     $E = $script:VpnEngines[$Engine]
     $Exe = Get-VpnEngineExe $Engine
-    if (-not $Exe) { $script:VpnPending = $Pf.Id; Start-VpnInstall $Engine; return }
     $Old = Test-VpnEngineVersion $P (Get-VpnEngineVersion $Engine)
     if ($Old) { Show-Toast "«$($Pf.Name)»: $Old" "warn"; return }
 
     $Port = Get-VpnPort
-    try { $Text = $(if ($Engine -eq "xray") { New-XrayConfig $P $Port } else { New-MihomoConfig $P $Port }) } catch { Show-Toast "«$($Pf.Name)»: $($_.Exception.Message)" "fail"; return }
+    $Inner = 0
+    if ($Kind -eq "naive") {
+        $Inner = Get-VpnInnerPort $Port
+        if (-not $Inner) { Show-Toast "Нет свободного порта для naive рядом с $Port — смени порт в настройках VPN" "warn"; return }
+    }
+    try { $Text = $(if ($Engine -eq "xray") { New-XrayConfig $P $Port } else { New-MihomoConfig $P $Port -InnerPort $Inner }) } catch { Show-Toast "«$($Pf.Name)»: $($_.Exception.Message)" "fail"; return }
     if (Test-LocalPortBusy $Port) { Show-Toast "Порт $Port занят на этом ПК — смени в настройках VPN" "warn"; return }
 
     if (-not (Test-Path $script:VpnDir)) { New-Item -ItemType Directory -Path $script:VpnDir | Out-Null }
@@ -679,25 +729,44 @@ function Start-Vpn {
     [IO.File]::WriteAllText($Cfg, $Text, [System.Text.UTF8Encoding]::new($false))
 
     # dry-run validates the config and fails fast with a readable reason instead of a dead process
+    # (before naive starts: a rejected mihomo config shouldn't leave naive.exe and its naive.json behind)
     $ChkArgs = $(if ($Engine -eq "xray") { "run -test -c $(Quote-Arg $Cfg)" } else { "-t -f $(Quote-Arg $Cfg) -d $(Quote-Arg $script:VpnDir)" })
-    $Chk = Invoke-SingBox $Exe $ChkArgs
+    $Chk = Invoke-VpnEngineCheck $Exe $ChkArgs
     if ($Chk.Code -ne 0) {
         $script:Vpn = @{ P = $null; Id = $Pf.Id; Started = [DateTime]::Now; Error = "конфиг не прошёл проверку"; Notified = $true; Lines = [System.Collections.Generic.List[string]]::new() }
-        Show-Confirm "$($E.Title) отверг конфиг" "Профиль «$($Pf.Name)». Ниже — вывод проверки." "Закрыть" -Detail $Chk.Out | Out-Null
+        Show-Confirm "$($E.Title) отверг конфиг" "Профиль «$($Pf.Name)». Ниже — вывод проверки." "Закрыть" -Detail (Hide-ProxySecret $Chk.Out) | Out-Null
         Refresh-Vpn
         return
     }
 
-    $Psi = New-Object System.Diagnostics.ProcessStartInfo $Exe
-    $Psi.Arguments = $(if ($Engine -eq "xray") { "run -c $(Quote-Arg $Cfg)" } else { "-f $(Quote-Arg $Cfg) -d $(Quote-Arg $script:VpnDir)" })
-    $Psi.WorkingDirectory = $script:VpnDir
-    $Psi.UseShellExecute = $false; $Psi.CreateNoWindow = $true
-    $Psi.RedirectStandardError = $true; $Psi.RedirectStandardOutput = $true
+    $Aux = $null
+    if ($Kind -eq "naive") {
+        $NCfg = Join-Path $script:VpnDir $script:VpnEngines.naive.Cfg
+        try {
+            [IO.File]::WriteAllText($NCfg, (New-NaiveConfig $P $Inner), [System.Text.UTF8Encoding]::new($false))
+            $NProc = Start-VpnProcess (Get-VpnEngineExe "naive") (Quote-Arg $NCfg)
+        } catch {
+            Remove-NaiveConfig
+            $script:Vpn = @{ P = $null; Id = $Pf.Id; Started = [DateTime]::Now; Error = "naive не запустился: $($_.Exception.Message)"; Notified = $true; Lines = [System.Collections.Generic.List[string]]::new() }
+            Refresh-Vpn; return
+        }
+        $Why = Wait-VpnListen $NProc $Inner
+        Remove-NaiveConfig   # read by now (or naive is dead) — the password stays on disk only for these seconds
+        if ($Why) {
+            $Lines = [System.Collections.Generic.List[string]]::new()
+            foreach ($L in (Read-VpnProcessOutput $NProc)) { $Lines.Add("naive: $L") }
+            $script:Vpn = @{ P = $null; Id = $Pf.Id; Started = [DateTime]::Now; Error = "naive $Why"; Notified = $true; Lines = $Lines }
+            Write-AppLog "vpn: naive $Why`n$(@($Lines | Select-Object -Last 5) -join "`n")"
+            Show-Toast "VPN «$($Pf.Name)»: naive $Why" "fail"
+            Refresh-Vpn; return
+        }
+        $Aux = @{ P = $NProc; Name = "naive"; ErrTask = $NProc.StandardError.ReadLineAsync(); OutTask = $NProc.StandardOutput.ReadLineAsync() }
+    }
+
     try {
-        $Proc = [System.Diagnostics.Process]::Start($Psi)
-        Add-ProcessToJob $Proc
+        $Proc = Start-VpnProcess $Exe $(if ($Engine -eq "xray") { "run -c $(Quote-Arg $Cfg)" } else { "-f $(Quote-Arg $Cfg) -d $(Quote-Arg $script:VpnDir)" })
         # mihomo logs to stdout; keep stderr too for crashes
-        $script:Vpn = @{ P = $Proc; Id = $Pf.Id; Engine = $Engine; Started = [DateTime]::Now; ErrTask = $Proc.StandardError.ReadLineAsync(); OutTask = $Proc.StandardOutput.ReadLineAsync(); Lines = [System.Collections.Generic.List[string]]::new(); Error = ""; Notified = $false; Port = $Port }
+        $script:Vpn = @{ P = $Proc; Aux = $Aux; Id = $Pf.Id; Engine = $Engine; Kind = $Kind; Started = [DateTime]::Now; ErrTask = $Proc.StandardError.ReadLineAsync(); OutTask = $Proc.StandardOutput.ReadLineAsync(); Lines = [System.Collections.Generic.List[string]]::new(); Error = ""; Notified = $false; Port = $Port }
         Save-VpnPid
         Set-SystemProxy "127.0.0.1:$Port"
         $script:Settings.VpnLast = $Pf.Id; Save-Settings
@@ -705,8 +774,9 @@ function Start-Vpn {
         Start-VpnProbe $Pf $Port
         Start-VpnStats $Engine $Exe $Port $P.Server $P.Port
     } catch {
-        # whatever failed after Start (proxy registry etc.) — don't leave sing-box running headless
+        # whatever failed after Start (proxy registry etc.) — don't leave engines running headless
         if ($Proc -and -not $Proc.HasExited) { try { $Proc.Kill($true) } catch { } }
+        if ($Aux -and -not $Aux.P.HasExited) { try { $Aux.P.Kill($true) } catch { } }
         if ($script:Settings.VpnProxySet) { try { Set-SystemProxy "" } catch { } }
         $script:Vpn = @{ P = $null; Id = $Pf.Id; Started = [DateTime]::Now; Error = "не запустился: $($_.Exception.Message)"; Notified = $true; Lines = [System.Collections.Generic.List[string]]::new() }
         Save-VpnPid
@@ -831,7 +901,7 @@ function Get-VpnStatText {
     return ($Parts -join " · ")
 }
 
-function Invoke-SingBox {
+function Invoke-VpnEngineCheck {
     param([string]$Exe, [string]$CmdArgs)
     $Psi = New-Object System.Diagnostics.ProcessStartInfo $Exe
     $Psi.Arguments = $CmdArgs
@@ -849,7 +919,9 @@ function Stop-Vpn {
     $Name = ""
     if ($script:Vpn) { $Pf = @(Get-VpnProfiles) | Where-Object { $_.Id -eq $script:Vpn.Id } | Select-Object -First 1; if ($Pf) { $Name = $Pf.Name } }
     if ($script:Vpn -and $script:Vpn.P -and -not $script:Vpn.P.HasExited) { try { $script:Vpn.P.Kill($true); [void]$script:Vpn.P.WaitForExit(3000) } catch { } }
+    if ($script:Vpn -and $script:Vpn.Aux -and -not $script:Vpn.Aux.P.HasExited) { try { $script:Vpn.Aux.P.Kill($true); [void]$script:Vpn.Aux.P.WaitForExit(3000) } catch { } }
     $script:Vpn = $null
+    Remove-NaiveConfig
     Stop-VpnStats
     Save-VpnPid
     Stop-VpnEngineProcesses
@@ -860,7 +932,7 @@ function Stop-Vpn {
     if ($Ui) { Refresh-Vpn }
 }
 
-# Called from the main pump once a second: drain sing-box log, notice a crash, tick the uptime
+# Called from the main pump once a second: drain the engine logs, notice a crash, tick the uptime
 function Invoke-VpnPump {
     if ($script:VpnPumpSw.ElapsedMilliseconds -lt 1000) { return }
     $script:VpnPumpSw.Restart()
@@ -872,30 +944,43 @@ function Invoke-VpnPump {
         return
     }
 
+    # main engine, then naive.exe behind it; every line masked before it reaches the UI or vpn.log
     $Changed = $false
-    foreach ($Key in @("OutTask", "ErrTask")) {
-        $Stream = $(if ($Key -eq "OutTask") { $S.P.StandardOutput } else { $S.P.StandardError })
-        while ($S[$Key] -and $S[$Key].IsCompleted) {
-            $L = $null
-            try { $L = $S[$Key].Result } catch { }
-            if ($null -eq $L) { $S[$Key] = $null; break }
-            $L = ($L -replace "\x1b\[[0-9;]*m", "").Trim()   # strip ANSI colors
-            if ($L) {
-                $S.Lines.Add($L); if ($S.Lines.Count -gt 200) { $S.Lines.RemoveAt(0) }; $Changed = $true
-                try { Add-Content -Path (Join-Path $script:VpnDir "vpn.log") -Value $L -Encoding UTF8 } catch { }
+    foreach ($Src in @(@{ T = $S; Prefix = "" }, $(if ($S.Aux) { @{ T = $S.Aux; Prefix = "naive: " } })) | Where-Object { $_ }) {
+        $T = $Src.T
+        foreach ($Key in @("OutTask", "ErrTask")) {
+            $Stream = $(if ($Key -eq "OutTask") { $T.P.StandardOutput } else { $T.P.StandardError })
+            while ($T[$Key] -and $T[$Key].IsCompleted) {
+                $L = $null
+                try { $L = $T[$Key].Result } catch { }
+                if ($null -eq $L) { $T[$Key] = $null; break }
+                $L = Hide-ProxySecret ($L -replace "\x1b\[[0-9;]*m", "").Trim()   # strip ANSI colors
+                if ($L) {
+                    $L = "$($Src.Prefix)$L"
+                    $S.Lines.Add($L); if ($S.Lines.Count -gt 200) { $S.Lines.RemoveAt(0) }; $Changed = $true
+                    try { Add-Content -Path (Join-Path $script:VpnDir "vpn.log") -Value $L -Encoding UTF8 } catch { }
+                }
+                $T[$Key] = $Stream.ReadLineAsync()
             }
-            $S[$Key] = $Stream.ReadLineAsync()
         }
     }
     if ($Changed -and $script:Page -eq "vpn") { Update-VpnLog }
 
-    if ($S.P.HasExited -and -not $S.Notified) {
+    # either process gone = the tunnel is gone: stop the other one too
+    $AuxDead = [bool]($S.Aux -and $S.Aux.P.HasExited)
+    if (($S.P.HasExited -or $AuxDead) -and -not $S.Notified) {
         $S.Notified = $true
-        $Last = @($S.Lines | Where-Object { $_ -match 'level=(error|fatal)|FATAL|ERROR|\[Error\]|failed to' } | Select-Object -Last 1)
-        $Err = if ($Last) { $Last[0] -replace '^.*msg="?', '' -replace '"$', '' -replace '^\S+ \S+ \[\w+\] ', '' } elseif ($S.Lines.Count) { $S.Lines[$S.Lines.Count - 1] } else { "$($S.Engine) завершился, код $($S.P.ExitCode)" }
+        foreach ($Pr in @($S.P, $(if ($S.Aux) { $S.Aux.P }))) { if ($Pr -and -not $Pr.HasExited) { try { $Pr.Kill($true); [void]$Pr.WaitForExit(2000) } catch { } } }
+        $Who = $(if ($AuxDead) { "naive" } else { $S.Engine })
+        $Pool = @($S.Lines | Where-Object { -not $AuxDead -or $_ -like "naive: *" })
+        $Last = @($Pool | Where-Object { $_ -match 'level=(error|fatal)|FATAL|ERROR|\[Error\]|failed to' } | Select-Object -Last 1)
+        $Err = if ($Last) { $Last[0] -replace '^naive: ', '' -replace '^.*msg="?', '' -replace '"$', '' -replace '^\S+ \S+ \[\w+\] ', '' } elseif ($Pool.Count) { $Pool[$Pool.Count - 1] } else { "$Who завершился, код $(if ($AuxDead) { $S.Aux.P.ExitCode } else { $S.P.ExitCode })" }
+        if ($AuxDead -and $Err -notlike "naive*") { $Err = "naive: $Err" }
         $S.Error = $Err
         try { Set-SystemProxy "" } catch { }
         Save-VpnPid
+        Stop-VpnStats
+        Write-AppLog "vpn: $Who exited: $Err"
         Show-Toast "VPN упал: $Err" "fail"
         Refresh-Vpn
     } elseif (-not $S.P.HasExited -and $script:Page -eq "vpn") {
@@ -922,7 +1007,7 @@ function New-VpnRow {
     $P = ConvertFrom-ProxyLink $Pf.Link
     return [pscustomobject]@{
         Id = $Pf.Id; Name = $Pf.Name
-        TypeText = $(switch ($Pf.Type) { "vless" { "VLESS" } "mieru" { "mieru" } "naive" { "Naïve" } default { "Hysteria2" } })
+        TypeText = $(switch ($Pf.Type) { "vless" { "VLESS" } "mieru" { "mieru" } "naive" { "NaïveProxy" } default { "Hysteria2" } })
         Server = "$($Pf.Server):$($Pf.Port)"
         Extra = $(if ($P) { Get-VpnExtra $P } else { "ссылка не разбирается" })
         StatusText = $Status; Kind = $Kind; Active = $Active
@@ -946,20 +1031,21 @@ function Refresh-Vpn {
     if ($Running) {
         $Pf = @(Get-VpnProfiles) | Where-Object { $_.Id -eq $script:Vpn.Id } | Select-Object -First 1
         $St = Get-VpnStatText
-        Set-StatusPill $Ui.VpnStatePill $Ui.VpnState "ok" "подключён: $($Pf.Name) · $($script:Vpn.Engine) · прокси 127.0.0.1:$($script:Vpn.Port)$(if ($St) { "  ·  $St" })"
+        Set-StatusPill $Ui.VpnStatePill $Ui.VpnState "ok" "подключён: $($Pf.Name) · $(if ($script:Vpn.Aux) { "naive + $($script:Vpn.Engine)" } else { $script:Vpn.Engine }) · прокси 127.0.0.1:$($script:Vpn.Port)$(if ($St) { "  ·  $St" })"
     } elseif ($script:Vpn -and $script:Vpn.Error) {
         Set-StatusPill $Ui.VpnStatePill $Ui.VpnState "fail" $script:Vpn.Error
     } else {
         Set-StatusPill $Ui.VpnStatePill $Ui.VpnState "none" "отключён"
     }
-    $Xv = Get-VpnEngineVersion "xray"; $Mv = Get-VpnEngineVersion "mihomo"
+    $Xv = Get-VpnEngineVersion "xray"; $Mv = Get-VpnEngineVersion "mihomo"; $Nv = Get-VpnEngineVersion "naive"
     $Parts = @(
         $(if ($Xv) { "xray $Xv" } else { "xray: нет — скачается для VLESS (спрошу)" })
-        $(if ($Mv) { "mihomo $Mv" } else { "mihomo: нет — скачается для Hysteria2 и mieru (спрошу)" })
+        $(if ($Mv) { "mihomo $Mv" } else { "mihomo: нет — скачается для Hysteria2, mieru и NaïveProxy (спрошу)" })
+        $(if ($Nv) { "naive $Nv" } else { "naive: нет — скачается для NaïveProxy (спрошу)" })
     )
     $Ui.VpnEngine.Text = $Parts -join "   ·   "
-    $Ui.VpnEngine.ToolTip = "xray: $(Get-VpnEngineExe 'xray')`nmihomo: $(Get-VpnEngineExe 'mihomo')"
-    $Ui.VpnEngine.Foreground = $(if ($Xv -or $Mv) { Get-Brush "Faint" } else { Get-Brush "Warn" })
+    $Ui.VpnEngine.ToolTip = "xray: $(Get-VpnEngineExe 'xray')`nmihomo: $(Get-VpnEngineExe 'mihomo')`nnaive: $(Get-VpnEngineExe 'naive')"
+    $Ui.VpnEngine.Foreground = $(if ($Xv -or $Mv -or $Nv) { Get-Brush "Faint" } else { Get-Brush "Warn" })
     Update-VpnLog
     Update-PageSub
     try { Update-TrayVpn } catch { }
@@ -985,7 +1071,7 @@ function Set-VpnBanner {
 function Get-VpnSub {
     $N = @(Get-VpnProfiles).Count
     if (Test-VpnRunning) { $Pf = @(Get-VpnProfiles) | Where-Object { $_.Id -eq $script:Vpn.Id } | Select-Object -First 1; return "Подключён через «$($Pf.Name)» · системный прокси · $(Get-Plural $N 'профиль' 'профиля' 'профилей')" }
-    if (-not $N) { return "VLESS через xray, Hysteria2 и mieru через mihomo · вставь ссылку из Happ" }
+    if (-not $N) { return "VLESS через xray, Hysteria2 и mieru через mihomo, NaïveProxy через naive · вставь ссылку из Happ" }
     return "$(Get-Plural $N 'профиль' 'профиля' 'профилей') · отключён"
 }
 
@@ -994,13 +1080,12 @@ function Get-VpnSub {
 function Add-VpnLinks {
     param([string[]]$Lines, [switch]$Quiet)
     $List = @(Get-VpnProfiles)
-    $Added = 0; $Dup = 0; $Bad = 0; $NoEngine = 0; $Why = ""
+    $Added = 0; $Dup = 0; $Bad = 0; $Why = ""
     foreach ($Line in $Lines) {
         $L = "$Line".Trim()
         if (-not $L -or $L.StartsWith("#")) { continue }
         $P = ConvertFrom-ProxyLink $L
         if (-not $P) { $Bad++; if (-not $Why) { $Why = Get-ProxyLinkError $L }; continue }
-        if (-not (Get-VpnEngineFor $P.Type)) { $NoEngine++; continue }   # naive: parsed, but nothing could run it
         if ($List | Where-Object { $_.Link -eq $P.Link }) { $Dup++; continue }
         $List += @{ Id = [guid]::NewGuid().ToString("N").Substring(0, 8); Name = $P.Name; Type = $P.Type; Server = $P.Server; Port = $P.Port; Link = $P.Link }
         $Added++
@@ -1012,8 +1097,7 @@ function Add-VpnLinks {
         $Msg = "Добавлено: $Added"
         if ($Dup) { $Msg += " · уже были: $Dup" }
         if ($Bad) { $Msg += " · не разобрал: $Bad ($Why)" }
-        if ($NoEngine) { $Msg += " · NaïveProxy пока не поддерживается: $NoEngine" }
-        Show-Toast $Msg $(if ($Added) { "ok" } elseif ($Bad -or $NoEngine) { "warn" } else { "info" })
+        Show-Toast $Msg $(if ($Added) { "ok" } elseif ($Bad) { "warn" } else { "info" })
     }
     return $Added
 }
@@ -1038,7 +1122,7 @@ function Show-VpnAddDialog {
     $D = New-Dialog "Добавить VPN-профиль" @"
 <StackPanel>
     <TextBlock Text="Добавить профиль" FontFamily="{StaticResource DisplayFont}" FontSize="20" FontWeight="SemiBold"/>
-    <TextBlock Text="Вставь ссылки vless://, hysteria2:// или mierus:// (одна на строку — в Happ: профиль → «Копировать ссылку»). Или адрес подписки https://… — скачаю и разберу." Foreground="{StaticResource Sub}" TextWrapping="Wrap" Margin="0,6,0,12" FontSize="12.5"/>
+    <TextBlock Text="Вставь ссылки vless://, hysteria2://, mierus:// или naive+https:// (одна на строку — в Happ: профиль → «Копировать ссылку»). Или адрес подписки https://… — скачаю и разберу." Foreground="{StaticResource Sub}" TextWrapping="Wrap" Margin="0,6,0,12" FontSize="12.5"/>
     <TextBox x:Name="FText" Style="{StaticResource Code}" IsReadOnly="False" AcceptsReturn="True" Height="180" VerticalScrollBarVisibility="Auto" TextWrapping="NoWrap" HorizontalScrollBarVisibility="Auto"/>
     <TextBlock x:Name="FError" Foreground="{StaticResource Fail}" FontSize="12" Margin="2,6,0,0" Visibility="Collapsed"/>
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
@@ -1052,7 +1136,7 @@ function Show-VpnAddDialog {
 "@ 620
     $F = @{}
     foreach ($N in @("FText", "FError", "FPaste", "FOk")) { $F[$N] = $D.FindName($N) }
-    try { $Clip = [System.Windows.Clipboard]::GetText(); if ($Clip -match '^(?i)(vless|hysteria2|hy2|mierus|https?)://') { $F.FText.Text = $Clip.Trim() } } catch { }
+    try { $Clip = [System.Windows.Clipboard]::GetText(); if ($Clip -match '^(?i)(vless|hysteria2|hy2|mierus|naive\+https|naive\+quic|https?)://') { $F.FText.Text = $Clip.Trim() } } catch { }
     $F.FPaste.Add_Click({ try { $F.FText.Text = [System.Windows.Clipboard]::GetText() } catch { } })
     $F.FOk.Add_Click({
         $Lines = @($F.FText.Text -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
@@ -1164,6 +1248,7 @@ function Initialize-VpnPage {
     $Ui.VpnInstallBtn.Add_Click({ param($S, $E) Show-Menu $S @(
         (New-MenuItem "xray — для VLESS (XTLS/Xray-core)" 0xE896 { Start-VpnInstall "xray" })
         (New-MenuItem "mihomo — для Hysteria2 и mieru (MetaCubeX/mihomo)" 0xE896 { Start-VpnInstall "mihomo" })
+        (New-MenuItem "naive — для NaïveProxy (klzgrad/naiveproxy)" 0xE896 { Start-VpnInstall "naive" })
     ) })
     $Ui.VpnFolderBtn.Add_Click({ if (-not (Test-Path $script:VpnDir)) { New-Item -ItemType Directory -Path $script:VpnDir | Out-Null }; Start-Process explorer.exe -ArgumentList (Quote-Arg $script:VpnDir) })
     $Ui.VpnList.Add_MouseDoubleClick({ $Pf = Get-SelectedVpn; if ($Pf) { Invoke-VpnAction "toggle:$($Pf.Id)" } })
@@ -1179,7 +1264,11 @@ function Initialize-VpnPage {
             $P = ConvertFrom-ProxyLink $Pf.Link
             $Eng = $(if ($P) { Get-VpnEngineFor $P.Type })
             if (-not $Eng) { Show-Toast "Для этого профиля нет движка" "warn"; return }
-            try { $J = $(if ($Eng -eq "xray") { New-XrayConfig $P (Get-VpnPort) } else { New-MihomoConfig $P (Get-VpnPort) }) } catch { $J = "ошибка: $($_.Exception.Message)" }
+            $Port = Get-VpnPort; $Inner = $(if ($Eng -eq "naive") { $Port + 3 } else { 0 })   # the real inner port is picked on connect
+            try {
+                $J = $(if ($Eng -eq "xray") { New-XrayConfig $P $Port } else { New-MihomoConfig $P $Port -InnerPort $Inner })
+                if ($Eng -eq "naive") { $J = "# naive.json (пароль скрыт)`n$(New-NaiveConfig $P $Inner -Mask)`n`n# mihomo.yaml`n$J" }
+            } catch { $J = "ошибка: $($_.Exception.Message)" }
             Show-Confirm "$($script:VpnEngines[$Eng].Cfg) · $($Pf.Name)" "То, что получит $Eng для этого профиля." "Закрыть" -Detail $J | Out-Null
         })
         "-"
