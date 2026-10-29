@@ -57,8 +57,29 @@ pwsh -STA -File NetKnife.ps1
 ```
 или `launch.vbs` (без консоли). Нужен PowerShell 7. Движки (xray, mihomo, ConEmu) скачиваются с их официальных GitHub-релизов в `%APPDATA%\NetKnife\`.
 
-## Релиз
+## Выпуск релиза
 
 ```
-pwsh -File tools\Publish.ps1 -Bump -Notes "что нового"
+git switch main; git pull --ff-only
+pwsh -File tools\Publish.ps1 -Bump -DryRun                  # проверки + сборка zip, ничего не коммитит и не отправляет
+pwsh -File tools\Publish.ps1 -Bump -Notes "что нового"      # или -Version X.Y.Z.N вместо -Bump
 ```
+
+Скрипт сначала проверяет и **ничего не меняет**, если что-то не так (ошибка по-русски — что именно и что сделать):
+
+- `gh auth status` в порядке;
+- после `git fetch origin`: текущая ветка `main`, рабочее дерево чистое (`git status --porcelain`, неотслеживаемые
+  файлы тоже считаются, игнорируемые нет), `HEAD` == `origin/main` — не впереди и не позади;
+- тега новой версии нет ни локально, ни на origin, и релиза с таким тегом на GitHub нет.
+
+Дальше: `VERSION` → `NetKnife.zip` во временной папке → коммит `release vX` только с `VERSION` (без `git add -A`) →
+тег → `git push --atomic origin main vX` (main и тег уходят вместе или никак; при обрыве связи тот же атомарный push
+повторяется до 3 раз) → `gh release create` только после успешного push.
+
+- Push не прошёл — релиз не создаётся, локально тег удаляется и `main` сбрасывается на исходный коммит (дерево было
+  чистым, терять нечего).
+- Push прошёл, а релиз не создался — скрипт пишет, что коммит и тег уже на GitHub, и печатает готовую команду
+  `gh release create …` для ручного завершения.
+
+`-DryRun` делает все проверки и собирает zip, затем возвращает `VERSION`; коммита, тега, push и релиза нет.
+Тесты скрипта (git/gh замоканы): `Invoke-Pester tests\Publish.Tests.ps1`.
