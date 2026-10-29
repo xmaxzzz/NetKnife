@@ -32,40 +32,105 @@ function Get-VpnPort {
 
 # vless://uuid@host:port?security=reality&pbk=..&sni=..&fp=..&sid=..&type=tcp&flow=xtls-rprx-vision#name
 # hysteria2://password@host:port?sni=..&insecure=1&obfs=salamander&obfs-password=..#name   (hy2:// alias)
+# mierus://user:pass@host?port=6666&protocol=TCP&port=9998-9999&protocol=UDP&multiplexing=MULTIPLEXING_HIGH&profile=default#name
+#   (`mieru export` URL: port/protocol come in pairs; mihomo takes one binding per proxy — the first TCP one, else the first)
+# naive+https://user:pass@host[:443]#name · naive+quic://…   (parsed only: no engine runs NaïveProxy yet)
+# A link that isn't one of these, or misses a required part, gives $null; Get-ProxyLinkError says why.
 function ConvertFrom-ProxyLink {
     param([string]$Link)
+    $R = ConvertFrom-ProxyLinkCore $Link
+    if ($R -is [string]) { return $null }
+    return $R
+}
+
+function Get-ProxyLinkError {
+    param([string]$Link)
+    $R = ConvertFrom-ProxyLinkCore $Link
+    if ($R -is [string]) { return $R }
+    return ""
+}
+
+# Returns the parsed profile, or a Russian reason string. Reasons never quote the link (it holds the password).
+function ConvertFrom-ProxyLinkCore {
+    param([string]$Link)
     $Link = "$Link".Trim()
-    if ($Link -notmatch '^(?i)(vless|hysteria2|hy2)://(.+)$') { return $null }
-    $Type = $Matches[1].ToLower(); if ($Type -eq "hy2") { $Type = "hysteria2" }
-    $Rest = $Matches[2]
+    if ($Link -notmatch '^(?i)(vless|hysteria2|hy2|mierus|naive\+https|naive\+quic)://(.+)$') { return "не ссылка vless://, hysteria2://, mierus:// или naive+https://" }
+    $Scheme = $Matches[1].ToLower(); $Rest = $Matches[2]
+    $Type = switch ($Scheme) { "hy2" { "hysteria2" } "mierus" { "mieru" } { $_ -like "naive+*" } { "naive" } default { $Scheme } }
 
     $Name = ""
     $Hash = $Rest.IndexOf('#')
     if ($Hash -ge 0) { $Name = [Uri]::UnescapeDataString($Rest.Substring($Hash + 1)); $Rest = $Rest.Substring(0, $Hash) }
 
     $Query = @{}
+    $Pairs = [System.Collections.Generic.List[object]]::new()   # in link order, repeats kept (mieru port/protocol)
     $Qm = $Rest.IndexOf('?')
     if ($Qm -ge 0) {
         foreach ($Kv in ($Rest.Substring($Qm + 1) -split '&')) {
             if (-not $Kv) { continue }
             $Eq = $Kv.IndexOf('=')
             if ($Eq -lt 0) { $Query[$Kv] = ""; continue }
-            $Query[$Kv.Substring(0, $Eq)] = [Uri]::UnescapeDataString($Kv.Substring($Eq + 1).Replace('+', '%2B'))
+            $K = $Kv.Substring(0, $Eq); $V = [Uri]::UnescapeDataString($Kv.Substring($Eq + 1).Replace('+', '%2B'))
+            $Query[$K] = $V; $Pairs.Add(@($K, $V))
         }
         $Rest = $Rest.Substring(0, $Qm)
     }
     $Rest = $Rest.TrimEnd('/')
 
     $At = $Rest.LastIndexOf('@')
-    if ($At -lt 0) { return $null }
-    $Auth = [Uri]::UnescapeDataString($Rest.Substring(0, $At))
+    if ($At -lt 0) { return "нет части «логин@сервер»" }
+    $RawAuth = $Rest.Substring(0, $At)
     $HostPort = $Rest.Substring($At + 1)
-    if ($HostPort -notmatch '^(\[[^\]]+\]|[^:]+):(\d{1,5})$') { return $null }
-    $Srv = $Matches[1].Trim('[', ']'); $Port = [int]$Matches[2]
-    if (-not $Auth -or -not $Srv -or $Port -lt 1) { return $null }
+    $User = ""; $Pass = ""
+    if ($Type -in @("mieru", "naive")) {
+        # split before unescaping: an escaped ':' (%3A) belongs to the name or password
+        $C = $RawAuth.IndexOf(':')
+        if ($C -lt 0) { return "нет пароля: нужно «пользователь:пароль@сервер»" }
+        $User = [Uri]::UnescapeDataString($RawAuth.Substring(0, $C)); $Pass = [Uri]::UnescapeDataString($RawAuth.Substring($C + 1))
+        if (-not $User) { return "пустое имя пользователя" }
+        if (-not $Pass) { return "пустой пароль" }
+        $Auth = $User
+    } else {
+        $Auth = [Uri]::UnescapeDataString($RawAuth)
+        if (-not $Auth) { return $(if ($Type -eq "vless") { "пустой UUID" } else { "пустой пароль" }) }
+    }
+
+    # mieru carries ports in the query; naive defaults to 443
+    if ($HostPort -match '^(\[[^\]]+\]|[^:\[\]]+)(?::(\d{1,5}))?$') { $Srv = $Matches[1].Trim('[', ']'); $PortStr = $Matches[2] } else { return "адрес сервера не разбирается" }
+    if (-not $Srv) { return "пустой адрес сервера" }
+    $Transport = ""; $PortRange = ""; $Proto = ""
+    switch ($Type) {
+        "mieru" {
+            $Ports = @($Pairs | Where-Object { $_[0] -eq "port" } | ForEach-Object { $_[1] })
+            $Protos = @($Pairs | Where-Object { $_[0] -eq "protocol" } | ForEach-Object { "$($_[1])".ToUpper() })
+            if (-not $Ports.Count) { return "нет параметра port" }
+            if ($Protos.Count -and $Protos.Count -ne $Ports.Count) { return "параметров port ($($Ports.Count)) и protocol ($($Protos.Count)) должно быть поровну" }
+            $Binds = @(for ($i = 0; $i -lt $Ports.Count; $i++) { [pscustomobject]@{ Port = $Ports[$i]; Proto = $(if ($Protos.Count) { $Protos[$i] } else { "TCP" }) } })
+            foreach ($B in $Binds) {
+                if ($B.Proto -notin @("TCP", "UDP")) { return "protocol «$($B.Proto)»: ожидаю TCP или UDP" }
+                if ($B.Port -notmatch '^(\d{1,5})(?:-(\d{1,5}))?$') { return "port «$($B.Port)»: ожидаю число или диапазон 1000-2000" }
+                $Lo = [int]$Matches[1]; $Hi = $(if ($Matches[2]) { [int]$Matches[2] } else { $Lo })
+                if ($Lo -lt 1 -or $Hi -gt 65535 -or $Lo -gt $Hi) { return "port «$($B.Port)» вне 1–65535" }
+            }
+            $B = @($Binds | Where-Object { $_.Proto -eq "TCP" }) + @($Binds) | Select-Object -First 1
+            $Transport = $B.Proto
+            if ($B.Port -match '-') { $PortRange = $B.Port }
+            $Port = [int]($B.Port -replace '-.*$', '')
+        }
+        "naive" {
+            $Proto = $Scheme.Substring(6)   # https | quic
+            $Port = $(if ($PortStr) { [int]$PortStr } else { 443 })
+        }
+        default {
+            if (-not $PortStr) { return "нет порта: нужно «сервер:порт»" }
+            $Port = [int]$PortStr
+        }
+    }
+    if ($Port -lt 1 -or $Port -gt 65535) { return "порт $Port вне 1–65535" }
     if (-not $Name) { $Name = "$Srv" }
 
-    return [pscustomobject]@{ Type = $Type; Auth = $Auth; Server = $Srv; Port = $Port; Name = $Name; Query = $Query; Link = $Link }
+    return [pscustomobject]@{ Type = $Type; Auth = $Auth; Server = $Srv; Port = $Port; Name = $Name; Query = $Query; Link = $Link
+        User = $User; Password = $Pass; Transport = $Transport; PortRange = $PortRange; Proto = $Proto }
 }
 
 function Get-VpnExtra {
@@ -78,6 +143,14 @@ function Get-VpnExtra {
         if ($Q.flow) { $Parts += ($Q.flow -replace '^xtls-rprx-', '') }
         return ($Parts -join " · ")
     }
+    if ($P.Type -eq "mieru") {
+        $Parts = @("$($P.Transport)".ToLower())
+        if ($P.PortRange) { $Parts += "порты $($P.PortRange)" }
+        if ($Q.multiplexing -match '^MULTIPLEXING_(OFF|LOW|MIDDLE|HIGH)$') { $Parts += "mux $($Matches[1].ToLower())" }
+        if ($Q.'handshake-mode' -eq "HANDSHAKE_NO_WAIT") { $Parts += "0-RTT" }
+        return ($Parts -join " · ")
+    }
+    if ($P.Type -eq "naive") { return "$($P.Proto) · движка пока нет" }
     $Parts = @("udp/quic")
     if ($Q.obfs) { $Parts += "obfs" }
     if ($Q.insecure -eq "1") { $Parts += "insecure" }
@@ -228,16 +301,60 @@ function Stop-VpnEngineProcesses {
 
 # ---------------------------------------------------------------- engines
 # VLESS → xray-core (the only core that follows current REALITY; it's also what Happ ships — reused when found).
-# Hysteria2 → mihomo (xray has no hysteria). Each is one exe in %APPDATA%\NetKnife\vpn or a known local install.
+# Hysteria2, mieru → mihomo (xray has neither). Each is one exe in %APPDATA%\NetKnife\vpn or a known local install.
+# NaïveProxy: links are parsed, but no engine runs them yet (mihomo has no naive outbound).
+# Downloads are pinned: Tag + exact asset + Size + Sha256 from the official GitHub release (the API "digest" field;
+# for xray it also matches the release's .dgst file). Bumping a version = updating all four here.
 
 $script:VpnEngines = @{
-    xray   = @{ Title = "xray";   Exe = "xray.exe";   Repo = "XTLS/Xray-core";   Asset = '^Xray-windows-64\.zip$';                       AssetArm = '^Xray-windows-arm64-v8a\.zip$';  ExeMatch = "xray.exe";    VerArgs = "version"; Cfg = "xray.json"
+    xray   = @{ Title = "xray";   Exe = "xray.exe";   Repo = "XTLS/Xray-core";   Tag = "v26.10.29"; ExeMatch = "xray.exe";    VerArgs = "version"; Cfg = "xray.json"
+                Asset    = @{ Name = "Xray-windows-64.zip";        Size = 16722699; Sha256 = "fce33e81cccf50e7aab572b175519a50b5e0f9d2f5c8d1ed73012ea5c9ad4d58" }
+                AssetArm = @{ Name = "Xray-windows-arm64-v8a.zip"; Size = 15041699; Sha256 = "b5314598249b2da55135e0d875adb653aadf926fa1bca73d34fdce78600f4204" }
                 Fallback = @("$env:ProgramFiles\FlyFrogLLC\Happ\core\xray.exe") }
-    mihomo = @{ Title = "mihomo"; Exe = "mihomo.exe"; Repo = "MetaCubeX/mihomo"; Asset = '^mihomo-windows-amd64-compatible-v[\d.]+\.zip$'; AssetArm = '^mihomo-windows-arm64-v[\d.]+\.zip$'; ExeMatch = "mihomo*.exe"; VerArgs = "-v";      Cfg = "mihomo.yaml"
+    mihomo = @{ Title = "mihomo"; Exe = "mihomo.exe"; Repo = "MetaCubeX/mihomo"; Tag = "v1.19.33"; ExeMatch = "mihomo*.exe"; VerArgs = "-v";      Cfg = "mihomo.yaml"
+                Asset    = @{ Name = "mihomo-windows-amd64-compatible-v1.19.33.zip"; Size = 22543546; Sha256 = "7aaf636a4f2172dcd8ec34ac4f52797b059195e5afd6409508c963e545f8864d" }
+                AssetArm = @{ Name = "mihomo-windows-arm64-v1.19.33.zip";            Size = 20212418; Sha256 = "a2a26869a14634c49f3fbcecc593b498ed8591fbdd7616b24475b3d60b148da3" }
                 Fallback = @("$env:ProgramFiles\Koala Clash\koala-mihomo.exe") }
 }
 
-function Get-VpnEngineFor { param([string]$Type) if ($Type -eq "vless") { return "xray" }; return "mihomo" }
+# Enum names mihomo accepts for mieru (mieru appctlpb MultiplexingLevel / HandshakeMode)
+$script:MieruEnums = @{
+    Multiplexing = @("MULTIPLEXING_DEFAULT", "MULTIPLEXING_OFF", "MULTIPLEXING_LOW", "MULTIPLEXING_MIDDLE", "MULTIPLEXING_HIGH")
+    Handshake    = @("HANDSHAKE_DEFAULT", "HANDSHAKE_STANDARD", "HANDSHAKE_NO_WAIT")
+}
+
+function Get-VpnEngineFor {
+    param([string]$Type)
+    switch ($Type) {
+        "vless"     { return "xray" }
+        "hysteria2" { return "mihomo" }
+        "mieru"     { return "mihomo" }
+    }
+    return $null   # naive and anything unknown: no engine
+}
+
+# Oldest engine version that runs this profile (mihomo release notes / adapter/outbound/mieru.go per tag); "" = any.
+function Get-VpnMinVersion {
+    param($P)
+    if ($P.Type -ne "mieru") { return "" }
+    $Q = $P.Query
+    $Min = [version]"1.19.0"                                                            # type: mieru, transport TCP
+    if ($Q.multiplexing) { $Min = [version]"1.19.1" }
+    if ($Q.'handshake-mode' -and $Min -lt [version]"1.19.13") { $Min = [version]"1.19.13" }
+    if ($P.Transport -eq "UDP" -and $Min -lt [version]"1.19.17") { $Min = [version]"1.19.17" }
+    if ($Q.'traffic-pattern' -and $Min -lt [version]"1.19.21") { $Min = [version]"1.19.21" }
+    return "$Min"
+}
+
+# "" when the installed engine is new enough (or its version can't be read — the config test will say), else a reason
+function Test-VpnEngineVersion {
+    param($P, [string]$Version)
+    $Min = Get-VpnMinVersion $P
+    if (-not $Min -or $Version -notmatch '^\d+\.\d+\.\d+$') { return "" }
+    if ([version]$Version -ge [version]$Min) { return "" }
+    $Eng = Get-VpnEngineFor $P.Type
+    return "$Eng $Version слишком старый для $($P.Type) (нужен $Min или новее) — скачай $($script:VpnEngines[$Eng].Tag): меню «Скачать движок»"
+}
 
 function Get-VpnEngineExe {
     param([string]$Engine)
@@ -341,7 +458,7 @@ function New-MihomoConfig {
     [void]$Y.AppendLine("  - name: proxy")
     [void]$Y.AppendLine("    type: $($P.Type)")
     [void]$Y.AppendLine("    server: $(ConvertTo-YamlStr $P.Server)")
-    [void]$Y.AppendLine("    port: $($P.Port)")
+    if ($P.Type -ne "mieru") { [void]$Y.AppendLine("    port: $($P.Port)") }   # mieru: port or port-range, below
     [void]$Y.AppendLine("    udp: true")
 
     if ($P.Type -eq "vless") {
@@ -389,7 +506,23 @@ function New-MihomoConfig {
                 if ($Q.host) { [void]$Y.AppendLine("      headers:"); [void]$Y.AppendLine("        Host: $(ConvertTo-YamlStr $Q.host)") }
             }
         }
-    } else {
+    } elseif ($P.Type -eq "mieru") {
+        if ($P.PortRange) { [void]$Y.AppendLine("    port-range: $(ConvertTo-YamlStr $P.PortRange)") } else { [void]$Y.AppendLine("    port: $($P.Port)") }
+        [void]$Y.AppendLine("    transport: $($P.Transport)")
+        [void]$Y.AppendLine("    username: $(ConvertTo-YamlStr $P.User)")
+        [void]$Y.AppendLine("    password: $(ConvertTo-YamlStr $P.Password)")
+        $Mux = "$($Q.multiplexing)"
+        if ($Mux) {
+            if ($Mux -notin $script:MieruEnums.Multiplexing) { throw "multiplexing «$Mux» не знаю — ожидаю $($script:MieruEnums.Multiplexing -join ', ')" }
+            [void]$Y.AppendLine("    multiplexing: $Mux")
+        }
+        $Hs = "$($Q.'handshake-mode')"
+        if ($Hs) {
+            if ($Hs -notin $script:MieruEnums.Handshake) { throw "handshake-mode «$Hs» не знаю — ожидаю $($script:MieruEnums.Handshake -join ', ')" }
+            [void]$Y.AppendLine("    handshake-mode: $Hs")
+        }
+        if ($Q.'traffic-pattern') { [void]$Y.AppendLine("    traffic-pattern: $(ConvertTo-YamlStr $Q.'traffic-pattern')") }
+    } elseif ($P.Type -eq "hysteria2") {
         [void]$Y.AppendLine("    password: $(ConvertTo-YamlStr $P.Auth)")
         if ($Q.sni) { [void]$Y.AppendLine("    sni: $(ConvertTo-YamlStr $Q.sni)") }
         if ($Q.insecure -eq "1") { [void]$Y.AppendLine("    skip-cert-verify: true") }
@@ -400,6 +533,8 @@ function New-MihomoConfig {
         }
         if ($Q.upmbps -match '^\d+$') { [void]$Y.AppendLine("    up: $($Q.upmbps)") }
         if ($Q.downmbps -match '^\d+$') { [void]$Y.AppendLine("    down: $($Q.downmbps)") }
+    } else {
+        throw "$($P.Type): mihomo этот протокол не умеет"
     }
 
     $Head = @(
@@ -430,68 +565,64 @@ function New-MihomoConfig {
 
 # ---------------------------------------------------------------- engine download
 
-# step 1: ask GitHub which release is current (worker, so the UI stays alive on a slow network)
-$script:VpnMetaBody = {
-    param($Q, $Ctl, $Repo, $Pat)
-    try {
-        $Rel = Invoke-RestMethod "https://api.github.com/repos/$Repo/releases/latest" -Headers @{ "User-Agent" = "NetKnife" } -TimeoutSec 25
-        $Asset = @($Rel.assets | Where-Object { $_.name -match $Pat }) | Select-Object -First 1
-        if (-not $Asset) { $Q.Enqueue(@{ Type = "vpnmeta"; Error = "в релизе $($Rel.tag_name) нет подходящей сборки для Windows" }); return }
-        $Q.Enqueue(@{ Type = "vpnmeta"; Version = "$($Rel.tag_name)"; Url = "$($Asset.browser_download_url)"; Size = [long]$Asset.size; Name = "$($Asset.name)" })
-    } catch { $Q.Enqueue(@{ Type = "vpnmeta"; Error = "GitHub не ответил: $($_.Exception.Message)" }) }
+# The pinned asset of an engine for this CPU, with its download URL by tag, not the moving "latest"
+function Get-VpnEngineAsset {
+    param([string]$Engine, [string]$Arch = "$env:PROCESSOR_ARCHITECTURE")
+    $E = $script:VpnEngines[$Engine]
+    $A = $(if ($Arch -eq "ARM64") { $E.AssetArm } else { $E.Asset })
+    return @{ Name = $A.Name; Size = [long]$A.Size; Sha256 = $A.Sha256.ToLower(); Url = "https://github.com/$($E.Repo)/releases/download/$($E.Tag)/$($A.Name)" }
 }
 
-# step 2 (after the user confirmed): download the zip, pull the engine exe out of it
+# worker: download the zip, check its SHA256 against the pinned one, pull the engine exe out of it
 $script:VpnDownloadBody = {
-    param($Q, $Ctl, $Url, $Dir, $ExeMatch, $Target)
+    param($Q, $Ctl, $Url, $Dir, $ExeMatch, $Target, $Sha256)
+    $Zip = Join-Path $Dir "download.zip"
+    $Tmp = Join-Path $Dir "unpack"
     try {
         if (-not (Test-Path $Dir)) { New-Item -ItemType Directory -Path $Dir | Out-Null }
-        $Zip = Join-Path $Dir "download.zip"
-        $Tmp = Join-Path $Dir "unpack"
         if (Test-Path $Tmp) { Remove-Item $Tmp -Recurse -Force }
         Invoke-WebRequest $Url -OutFile $Zip -Headers @{ "User-Agent" = "NetKnife" } -TimeoutSec 300
+        $Got = (Get-FileHash $Zip -Algorithm SHA256).Hash.ToLower()
+        if ($Got -ne "$Sha256".ToLower()) {
+            Remove-Item $Zip -Force -ErrorAction SilentlyContinue
+            $Q.Enqueue(@{ Type = "vpndl"; Error = "контрольная сумма не совпала (SHA256 $($Got.Substring(0, 12))…, ждал $("$Sha256".Substring(0, 12))…) — файл удалён, ничего не установлено" }); return
+        }
         Expand-Archive $Zip -DestinationPath $Tmp -Force
         $Exe = Get-ChildItem $Tmp -Recurse -Filter $ExeMatch | Select-Object -First 1
         if (-not $Exe) { $Q.Enqueue(@{ Type = "vpndl"; Error = "в архиве нет $ExeMatch" }); return }
         Copy-Item $Exe.FullName (Join-Path $Dir $Target) -Force
-        Remove-Item $Tmp -Recurse -Force -ErrorAction SilentlyContinue
-        Remove-Item $Zip -Force -ErrorAction SilentlyContinue
         $Q.Enqueue(@{ Type = "vpndl"; Ok = $true })
     } catch { $Q.Enqueue(@{ Type = "vpndl"; Error = "$($_.Exception.Message)" }) }
+    finally {
+        Remove-Item $Tmp -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item $Zip -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Start-VpnInstall {
     param([string]$Engine = "xray")
-    if ((Test-WorkerRunning "vpn-meta") -or (Test-WorkerRunning "vpn-dl")) { return }
+    if (Test-WorkerRunning "vpn-dl") { return }
     $E = $script:VpnEngines[$Engine]
-    $Pat = if ("$env:PROCESSOR_ARCHITECTURE" -eq "ARM64") { $E.AssetArm } else { $E.Asset }
-    Set-VpnBanner "wait" "Узнаю актуальную версию $($E.Title) на GitHub…"
-    [void](Start-Worker -Name "vpn-meta" -Body $script:VpnMetaBody -ArgList @($E.Repo, $Pat) -State @{ E = $E; Engine = $Engine } -OnMessage {
-        param($M)
+    $A = Get-VpnEngineAsset $Engine
+    $script:VpnInstall = @{ Engine = $Engine; Version = $E.Tag; Url = $A.Url; Size = $A.Size; Name = $A.Name }
+    $Mb = "{0:N1} МБ" -f ($A.Size / 1MB)
+    $Msg = "Движок VPN. Скачается официальный релиз $($E.Repo) $($E.Tag) ($Mb) в $($script:VpnDir), SHA256 сверяется с записанным в NetKnife. Больше ничего не ставится и не меняется."
+    if (-not (Show-Confirm "Скачать $($E.Title) $($E.Tag)?" $Msg "Скачать" -Detail "$($A.Url)`nSHA256 $($A.Sha256)")) { $script:VpnPending = $null; return }
+    Set-VpnBanner "wait" "Скачиваю $($E.Title) $($E.Tag) ($Mb)…"
+    [void](Start-Worker -Name "vpn-dl" -Body $script:VpnDownloadBody -ArgList @($A.Url, $script:VpnDir, $E.ExeMatch, $E.Exe, $A.Sha256) -State @{ E = $E; Engine = $Engine } -OnMessage {
+        param($M2)
         $E = $State.E; $Engine = $State.Engine
-        if ($M.Type -ne "vpnmeta") { return }
-        if ($M.Error) { Set-VpnBanner "fail" "$($E.Title) не скачать: $($M.Error)"; $script:VpnPending = $null; return }
-        $script:VpnInstall = @{ Engine = $Engine; Version = $M.Version; Url = $M.Url; Size = $M.Size; Name = $M.Name }
+        if ($M2.Type -ne "vpndl") { return }
+        if ($M2.Error) { Set-VpnBanner "fail" "$($E.Title) не установлен: $($M2.Error)"; Write-AppLog "vpn: $($E.Title) $($E.Tag) download failed: $($M2.Error)"; $script:VpnPending = $null; return }
         Set-VpnBanner "none" ""
-        $Mb = "{0:N1} МБ" -f ($M.Size / 1MB)
-        $Msg = "Движок VPN. Скачается официальный релиз $($E.Repo) $($M.Version) ($Mb) в $($script:VpnDir). Больше ничего не ставится и не меняется."
-        if (-not (Show-Confirm "Скачать $($E.Title) $($M.Version)?" $Msg "Скачать" -Detail $M.Url)) { $script:VpnPending = $null; return }
-        Set-VpnBanner "wait" "Скачиваю $($E.Title) $($M.Version) ($Mb)…"
-        [void](Start-Worker -Name "vpn-dl" -Body $script:VpnDownloadBody -ArgList @($M.Url, $script:VpnDir, $E.ExeMatch, $E.Exe) -State @{ E = $E; Engine = $Engine } -OnMessage {
-            param($M2)
-            $E = $State.E; $Engine = $State.Engine
-            if ($M2.Type -ne "vpndl") { return }
-            if ($M2.Error) { Set-VpnBanner "fail" "Загрузка не удалась: $($M2.Error)"; $script:VpnPending = $null; return }
-            Set-VpnBanner "none" ""
-            Show-Toast "$($E.Title) $($script:VpnInstall.Version) установлен"
-            [void](Get-VpnEngineVersion $Engine -Fresh)
-            Refresh-Vpn
-            if ($script:VpnPending) {
-                $Pf = @(Get-VpnProfiles) | Where-Object { $_.Id -eq $script:VpnPending } | Select-Object -First 1
-                $script:VpnPending = $null
-                if ($Pf) { Start-Vpn $Pf }
-            }
-        })
+        Show-Toast "$($E.Title) $($E.Tag) установлен"
+        [void](Get-VpnEngineVersion $Engine -Fresh)
+        Refresh-Vpn
+        if ($script:VpnPending) {
+            $Pf = @(Get-VpnProfiles) | Where-Object { $_.Id -eq $script:VpnPending } | Select-Object -First 1
+            $script:VpnPending = $null
+            if ($Pf) { Start-Vpn $Pf }
+        }
     })
 }
 
@@ -532,9 +663,12 @@ function Start-Vpn {
     $P = ConvertFrom-ProxyLink $Pf.Link
     if (-not $P) { Show-Toast "Ссылка профиля «$($Pf.Name)» не разбирается" "fail"; return }
     $Engine = Get-VpnEngineFor $P.Type
+    if (-not $Engine) { Show-Toast "«$($Pf.Name)»: $($P.Type) пока не поддерживается — нет движка" "warn"; return }
     $E = $script:VpnEngines[$Engine]
     $Exe = Get-VpnEngineExe $Engine
     if (-not $Exe) { $script:VpnPending = $Pf.Id; Start-VpnInstall $Engine; return }
+    $Old = Test-VpnEngineVersion $P (Get-VpnEngineVersion $Engine)
+    if ($Old) { Show-Toast "«$($Pf.Name)»: $Old" "warn"; return }
 
     $Port = Get-VpnPort
     try { $Text = $(if ($Engine -eq "xray") { New-XrayConfig $P $Port } else { New-MihomoConfig $P $Port }) } catch { Show-Toast "«$($Pf.Name)»: $($_.Exception.Message)" "fail"; return }
@@ -788,7 +922,7 @@ function New-VpnRow {
     $P = ConvertFrom-ProxyLink $Pf.Link
     return [pscustomobject]@{
         Id = $Pf.Id; Name = $Pf.Name
-        TypeText = $(if ($Pf.Type -eq "vless") { "VLESS" } else { "Hysteria2" })
+        TypeText = $(switch ($Pf.Type) { "vless" { "VLESS" } "mieru" { "mieru" } "naive" { "Naïve" } default { "Hysteria2" } })
         Server = "$($Pf.Server):$($Pf.Port)"
         Extra = $(if ($P) { Get-VpnExtra $P } else { "ссылка не разбирается" })
         StatusText = $Status; Kind = $Kind; Active = $Active
@@ -821,7 +955,7 @@ function Refresh-Vpn {
     $Xv = Get-VpnEngineVersion "xray"; $Mv = Get-VpnEngineVersion "mihomo"
     $Parts = @(
         $(if ($Xv) { "xray $Xv" } else { "xray: нет — скачается для VLESS (спрошу)" })
-        $(if ($Mv) { "mihomo $Mv" } else { "mihomo: нет — скачается для Hysteria2 (спрошу)" })
+        $(if ($Mv) { "mihomo $Mv" } else { "mihomo: нет — скачается для Hysteria2 и mieru (спрошу)" })
     )
     $Ui.VpnEngine.Text = $Parts -join "   ·   "
     $Ui.VpnEngine.ToolTip = "xray: $(Get-VpnEngineExe 'xray')`nmihomo: $(Get-VpnEngineExe 'mihomo')"
@@ -851,7 +985,7 @@ function Set-VpnBanner {
 function Get-VpnSub {
     $N = @(Get-VpnProfiles).Count
     if (Test-VpnRunning) { $Pf = @(Get-VpnProfiles) | Where-Object { $_.Id -eq $script:Vpn.Id } | Select-Object -First 1; return "Подключён через «$($Pf.Name)» · системный прокси · $(Get-Plural $N 'профиль' 'профиля' 'профилей')" }
-    if (-not $N) { return "VLESS и Hysteria2 через mihomo · вставь ссылку из Happ" }
+    if (-not $N) { return "VLESS через xray, Hysteria2 и mieru через mihomo · вставь ссылку из Happ" }
     return "$(Get-Plural $N 'профиль' 'профиля' 'профилей') · отключён"
 }
 
@@ -860,12 +994,13 @@ function Get-VpnSub {
 function Add-VpnLinks {
     param([string[]]$Lines, [switch]$Quiet)
     $List = @(Get-VpnProfiles)
-    $Added = 0; $Dup = 0; $Bad = 0
+    $Added = 0; $Dup = 0; $Bad = 0; $NoEngine = 0; $Why = ""
     foreach ($Line in $Lines) {
         $L = "$Line".Trim()
         if (-not $L -or $L.StartsWith("#")) { continue }
         $P = ConvertFrom-ProxyLink $L
-        if (-not $P) { $Bad++; continue }
+        if (-not $P) { $Bad++; if (-not $Why) { $Why = Get-ProxyLinkError $L }; continue }
+        if (-not (Get-VpnEngineFor $P.Type)) { $NoEngine++; continue }   # naive: parsed, but nothing could run it
         if ($List | Where-Object { $_.Link -eq $P.Link }) { $Dup++; continue }
         $List += @{ Id = [guid]::NewGuid().ToString("N").Substring(0, 8); Name = $P.Name; Type = $P.Type; Server = $P.Server; Port = $P.Port; Link = $P.Link }
         $Added++
@@ -876,8 +1011,9 @@ function Add-VpnLinks {
     if (-not $Quiet) {
         $Msg = "Добавлено: $Added"
         if ($Dup) { $Msg += " · уже были: $Dup" }
-        if ($Bad) { $Msg += " · не разобрал: $Bad" }
-        Show-Toast $Msg $(if ($Added) { "ok" } elseif ($Bad) { "warn" } else { "info" })
+        if ($Bad) { $Msg += " · не разобрал: $Bad ($Why)" }
+        if ($NoEngine) { $Msg += " · NaïveProxy пока не поддерживается: $NoEngine" }
+        Show-Toast $Msg $(if ($Added) { "ok" } elseif ($Bad -or $NoEngine) { "warn" } else { "info" })
     }
     return $Added
 }
@@ -902,7 +1038,7 @@ function Show-VpnAddDialog {
     $D = New-Dialog "Добавить VPN-профиль" @"
 <StackPanel>
     <TextBlock Text="Добавить профиль" FontFamily="{StaticResource DisplayFont}" FontSize="20" FontWeight="SemiBold"/>
-    <TextBlock Text="Вставь ссылки vless:// или hysteria2:// (одна на строку — в Happ: профиль → «Копировать ссылку»). Или адрес подписки https://… — скачаю и разберу." Foreground="{StaticResource Sub}" TextWrapping="Wrap" Margin="0,6,0,12" FontSize="12.5"/>
+    <TextBlock Text="Вставь ссылки vless://, hysteria2:// или mierus:// (одна на строку — в Happ: профиль → «Копировать ссылку»). Или адрес подписки https://… — скачаю и разберу." Foreground="{StaticResource Sub}" TextWrapping="Wrap" Margin="0,6,0,12" FontSize="12.5"/>
     <TextBox x:Name="FText" Style="{StaticResource Code}" IsReadOnly="False" AcceptsReturn="True" Height="180" VerticalScrollBarVisibility="Auto" TextWrapping="NoWrap" HorizontalScrollBarVisibility="Auto"/>
     <TextBlock x:Name="FError" Foreground="{StaticResource Fail}" FontSize="12" Margin="2,6,0,0" Visibility="Collapsed"/>
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
@@ -916,7 +1052,7 @@ function Show-VpnAddDialog {
 "@ 620
     $F = @{}
     foreach ($N in @("FText", "FError", "FPaste", "FOk")) { $F[$N] = $D.FindName($N) }
-    try { $Clip = [System.Windows.Clipboard]::GetText(); if ($Clip -match '^(?i)(vless|hysteria2|hy2|https?)://') { $F.FText.Text = $Clip.Trim() } } catch { }
+    try { $Clip = [System.Windows.Clipboard]::GetText(); if ($Clip -match '^(?i)(vless|hysteria2|hy2|mierus|https?)://') { $F.FText.Text = $Clip.Trim() } } catch { }
     $F.FPaste.Add_Click({ try { $F.FText.Text = [System.Windows.Clipboard]::GetText() } catch { } })
     $F.FOk.Add_Click({
         $Lines = @($F.FText.Text -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
@@ -1027,7 +1163,7 @@ function Initialize-VpnPage {
     $Ui.VpnPortBtn.Add_Click({ Show-VpnPortDialog })
     $Ui.VpnInstallBtn.Add_Click({ param($S, $E) Show-Menu $S @(
         (New-MenuItem "xray — для VLESS (XTLS/Xray-core)" 0xE896 { Start-VpnInstall "xray" })
-        (New-MenuItem "mihomo — для Hysteria2 (MetaCubeX/mihomo)" 0xE896 { Start-VpnInstall "mihomo" })
+        (New-MenuItem "mihomo — для Hysteria2 и mieru (MetaCubeX/mihomo)" 0xE896 { Start-VpnInstall "mihomo" })
     ) })
     $Ui.VpnFolderBtn.Add_Click({ if (-not (Test-Path $script:VpnDir)) { New-Item -ItemType Directory -Path $script:VpnDir | Out-Null }; Start-Process explorer.exe -ArgumentList (Quote-Arg $script:VpnDir) })
     $Ui.VpnList.Add_MouseDoubleClick({ $Pf = Get-SelectedVpn; if ($Pf) { Invoke-VpnAction "toggle:$($Pf.Id)" } })
@@ -1041,7 +1177,8 @@ function Initialize-VpnPage {
         (New-MenuItem "Показать конфиг движка" 0xE943 {
             $Pf = Get-SelectedVpn; if (-not $Pf) { return }
             $P = ConvertFrom-ProxyLink $Pf.Link
-            $Eng = Get-VpnEngineFor $P.Type
+            $Eng = $(if ($P) { Get-VpnEngineFor $P.Type })
+            if (-not $Eng) { Show-Toast "Для этого профиля нет движка" "warn"; return }
             try { $J = $(if ($Eng -eq "xray") { New-XrayConfig $P (Get-VpnPort) } else { New-MihomoConfig $P (Get-VpnPort) }) } catch { $J = "ошибка: $($_.Exception.Message)" }
             Show-Confirm "$($script:VpnEngines[$Eng].Cfg) · $($Pf.Name)" "То, что получит $Eng для этого профиля." "Закрыть" -Detail $J | Out-Null
         })
