@@ -11,17 +11,41 @@
 
 ## Установка
 
-1. PowerShell 7: `winget install --id Microsoft.PowerShell -e`.
-2. Скачать `NetKnife.zip` из [releases/latest](https://github.com/xmaxzzz/NetKnife/releases/latest) и распаковать
-   в любую папку (пробелы и кириллица в пути — можно).
-3. Снять пометку «скачано из интернета», иначе Windows не даст запустить скрипты:
-   ```
-   Get-ChildItem "<папка>" -Recurse | Unblock-File
-   ```
-4. Запуск — двойной клик по `launch.vbs` (без консоли). Если PowerShell 7 не найден, он скажет, что поставить.
+Одна команда в обычном PowerShell (Win+X → «Терминал»), админ не нужен:
 
-Программа ничего не пишет в свою папку: настройки, движки и очередь обходов — в `%APPDATA%\NetKnife\`.
-Обновление — из самой программы: «Настройки → Обновить» (скачивает релиз с GitHub и заменяет файлы в той же папке).
+```
+irm https://raw.githubusercontent.com/xmaxzzz/NetKnife/main/install.ps1 | iex
+```
+
+Она ставит PowerShell 7 через winget (если его нет), скачивает `NetKnife.zip` из
+[releases/latest](https://github.com/xmaxzzz/NetKnife/releases/latest), сверяет SHA256 с GitHub, распаковывает в
+`%LOCALAPPDATA%\NetKnife`, создаёт ярлыки «NetKnife» в меню «Пуск» и на рабочем столе и запускает программу.
+Эта же команда повторно — обновление (запущенный NetKnife закроется сам). Другая папка или удаление:
+
+```
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/xmaxzzz/NetKnife/main/install.ps1))) -Path D:\Tools\NetKnife
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/xmaxzzz/NetKnife/main/install.ps1))) -Uninstall   # + -RemoveData — спросит про данные
+```
+
+Настройки, профили VPN, движки и очередь обходов — в `%APPDATA%\NetKnife\`; установка, обновление и удаление их
+не трогают (удаление с `-RemoveData` — только после вопроса).
+
+**Обновления.** При запуске NetKnife тихо проверяет GitHub (не чаще раза в 6 часов). Есть новая версия — сверху
+плашка «Доступна vX — Обновить»: одно нажатие скачивает релиз, сверяет SHA256, закрывает программу, сохраняет
+прежние файлы в `%APPDATA%\NetKnife\update\backup\`, заменяет их и запускает NetKnife снова. Если новая версия не
+запустилась за 90 с или файлы не скопировались — прежние возвращаются, программа говорит, что пошло не так.
+Журнал: `%APPDATA%\NetKnife\update\install.log`.
+
+**Как поставить другому человеку** — отправить:
+
+> Открой PowerShell (Win+X → «Терминал») и вставь:
+> `irm https://raw.githubusercontent.com/xmaxzzz/NetKnife/main/install.ps1 | iex`
+> Обновления потом — кнопкой «Обновить» в самой программе.
+
+**Запасной путь — вручную.** PowerShell 7 (`winget install --id Microsoft.PowerShell -e`) → скачать `NetKnife.zip`
+из releases/latest → распаковать в любую папку (пробелы и кириллица — можно) →
+`Get-ChildItem "<папка>" -Recurse | Unblock-File` → двойной клик по `launch.vbs`. Обновления из программы работают и
+в такой папке.
 
 ## Wi-Fi обход (сборщик для Helpdesk)
 
@@ -62,7 +86,8 @@ NetKnife на вкладке «Wi-Fi обход» только **собирае�
 pwsh -c "Invoke-Pester -Path tests"
 ```
 Pester 5. `tests/Collector.Tests.ps1` — клиент протокола против сервера в памяти; `tests/App.Tests.ps1` — целостность
-(удалённые модули, разбор скриптов, имена элементов `Main.xaml`); `tests/Portable.Tests.ps1` — нет жёстких путей установки. Работают и в pwsh на Linux (DPAPI — только Windows).
+(удалённые модули, разбор скриптов, имена элементов `Main.xaml`); `tests/Portable.Tests.ps1` — нет жёстких путей установки;
+`tests/Install.Tests.ps1` и `tests/Update.Tests.ps1` — установщик и обновление из программы (сеть замокана). Работают и в pwsh на Linux (DPAPI — только Windows).
 
 ## Запуск
 
@@ -97,3 +122,5 @@ pwsh -File tools\Publish.ps1 -Bump -Notes "что нового"      # или -V
 
 `-DryRun` делает все проверки и собирает zip, затем возвращает `VERSION`; коммита, тега, push и релиза нет.
 Тесты скрипта (git/gh замоканы): `Invoke-Pester tests\Publish.Tests.ps1`.
+
+После релиза у пользователей при следующем запуске NetKnife — плашка «Обновить» (ответ GitHub кэшируется до 6 часов).

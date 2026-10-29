@@ -282,6 +282,7 @@ Initialize-ScannerPage
 Initialize-PortsPage
 Initialize-ToolsPages
 Initialize-SettingsPage
+Initialize-UpdateBanner
 
 $Pump = New-Object System.Windows.Threading.DispatcherTimer
 $Pump.Interval = [TimeSpan]::FromMilliseconds(120)
@@ -290,6 +291,7 @@ $Pump.Add_Tick({
     try { Invoke-TunnelPump } catch { Write-AppLog "tunnel pump: $_ $($_.ScriptStackTrace)" }
     try { Invoke-VpnPump } catch { Write-AppLog "vpn pump: $_ $($_.ScriptStackTrace)" }
     try { Invoke-WifiPump } catch { Write-AppLog "wifi pump: $_ $($_.ScriptStackTrace)" }
+    try { Test-QuitSignal } catch { Write-AppLog "quit signal: $_" }
     foreach ($P in @($script:EngineProcs)) {
         if ($P.HasExited) {
             $script:EngineProcs.Remove($P) | Out-Null
@@ -322,6 +324,7 @@ $Win.Add_ContentRendered({
         Start-AutoTunnels
         try { Initialize-Tray; if ($script:Settings.HotKey) { Register-AppHotKey } } catch { Write-AppLog "tray: $_" }
         if ($script:Settings.AutoUpdateCheck) { try { Start-UpdateCheck } catch { Write-AppLog "update: $_" } }
+        try { Show-UpdateResult } catch { Write-AppLog "update result: $_" }
         [void]$Ui.HostList.Focus()
     } catch {
         Write-AppLog "startup: $_ $($_.ScriptStackTrace)"
@@ -352,6 +355,7 @@ $Win.Add_Closing({
 
 # Show + Dispatcher.Run instead of ShowDialog: hiding to tray must not end the message loop
 $Win.Add_Closed({ try { $script:Win.Dispatcher.InvokeShutdown() } catch { } })
+Register-AppStarted
 $Win.Show()
 [System.Windows.Threading.Dispatcher]::Run()
 Remove-Tray

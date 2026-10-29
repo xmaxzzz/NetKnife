@@ -11,7 +11,7 @@ function Get-Settings {
         Theme = "system"; ScanHistory = @(); PingHistory = @(); PortHistory = @(); DnsHistory = @()
         Favorites = @(); Snippets = @(); Tunnels = @(); Monitor = @()
         MinimizeToTray = $true; HotKey = $true; TrayHintShown = $false
-        StartupPage = "hosts"; AutoUpdateCheck = $true
+        StartupPage = "hosts"; AutoUpdateCheck = $true; UpdateCheckedAt = 0; UpdateCache = $null
         VpnProfiles = @(); VpnPort = 2080; VpnProxySet = $false; VpnProxyBackup = $null; VpnLast = ""
     }
     try {

@@ -482,6 +482,7 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
 
@@ -517,8 +518,20 @@
                     </Border>
                 </DockPanel>
 
+                <!-- update banner (lib\Update.ps1) -->
+                <Border x:Name="UpdBanner" Grid.Row="1" Style="{StaticResource CardBox}" Background="{StaticResource AccentSoft}" BorderBrush="{StaticResource AccentSoft}" Padding="12,6" Margin="26,10,16,0" Visibility="Collapsed">
+                    <DockPanel>
+                        <Button x:Name="UpdBannerClose" DockPanel.Dock="Right" Style="{StaticResource IconBtn}" Content="&#xE711;" ToolTip="Скрыть до следующего запуска" Margin="4,0,0,0"/>
+                        <Button x:Name="UpdBannerBtn" DockPanel.Dock="Right" Style="{StaticResource AccentBtn}" Padding="12,5" Margin="8,0,0,0">
+                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE896;" Style="{StaticResource Glyph}"/><TextBlock x:Name="UpdBannerBtnText" Text="Обновить"/></StackPanel>
+                        </Button>
+                        <TextBlock Text="&#xE946;" Style="{StaticResource Glyph}" Foreground="{StaticResource Accent}"/>
+                        <TextBlock x:Name="UpdBannerText" VerticalAlignment="Center" TextWrapping="Wrap" FontSize="13"/>
+                    </DockPanel>
+                </Border>
+
                 <!-- page header -->
-                <Grid Grid.Row="1" Margin="26,16,16,10">
+                <Grid Grid.Row="2" Margin="26,16,16,10">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <StackPanel VerticalAlignment="Center">
                         <TextBlock x:Name="PageTitle" Text="Хосты" FontFamily="{StaticResource DisplayFont}" FontSize="26" FontWeight="SemiBold"/>
@@ -540,7 +553,7 @@
                 </Grid>
 
                 <!-- ================= pages ================= -->
-                <Grid Grid.Row="2">
+                <Grid Grid.Row="3">
 
                     <!-- HOSTS -->
                     <Grid x:Name="PageHosts">
@@ -1396,12 +1409,12 @@
 
                 <!-- toast -->
                 <!-- quick ping: floating, bottom-right, above the pages (Ctrl+L) -->
-                <Border Grid.RowSpan="3" VerticalAlignment="Bottom" HorizontalAlignment="Right" Margin="0,0,18,14" CornerRadius="10" Background="{StaticResource Card}" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="4">
+                <Border Grid.RowSpan="4" VerticalAlignment="Bottom" HorizontalAlignment="Right" Margin="0,0,18,14" CornerRadius="10" Background="{StaticResource Card}" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="4">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="&#xE9D9;" Style="{StaticResource Glyph}" FontSize="12" Foreground="{StaticResource Sub}" VerticalAlignment="Center" Margin="8,0,2,0"/>
                         <TextBox x:Name="QuickPing" Style="{StaticResource Search}" Width="220" Height="30" Tag="Быстрый пинг: адрес и Enter"/>
                     </StackPanel>
-                </Border>                <Border x:Name="Toast" Grid.RowSpan="3" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,26"
+                </Border>                <Border x:Name="Toast" Grid.RowSpan="4" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,26"
                         Background="{StaticResource Card}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="10" Padding="14,9" Opacity="0" IsHitTestVisible="False">
                     <Border.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="3" Opacity="0.35"/></Border.Effect>
                     <StackPanel Orientation="Horizontal">
