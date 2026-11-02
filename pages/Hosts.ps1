@@ -53,6 +53,7 @@ function New-HostRow {
         StatusText = $(if ($St) { $St.Text } else { "" })
         Fav = (@($script:Settings.Favorites) -contains $H.Alias)
         Badges = $Badges
+        Group = $(if ($H.Group) { $H.Group } else { "Локальные" })
         Host = $H
     }
 }
@@ -97,13 +98,26 @@ function Refresh-Ssh {
     if ($Ui.HostList.SelectedItem) { $SelHost = $Ui.HostList.SelectedItem.Alias }
     if ($Ui.KeyList.SelectedItem) { $SelKey = $Ui.KeyList.SelectedItem.Key.Path }
 
-    $script:Hosts = @(Get-SshHosts)
+    # hand-written hosts keep their names; Helpdesk aliases that clash get ".<site>" (Update-HdHosts)
+    $Local = @(Get-SshHosts)
+    try { Update-HdHosts @($Local | ForEach-Object Alias); $W = Write-HdSshFiles; if ($W -and $W.Backup) { Show-Toast "~/.ssh/config: добавлен Include хостов Helpdesk · бэкап $([IO.Path]::GetFileName($W.Backup))" "info" } }
+    catch { Write-AppLog "helpdesk ssh files: $_" }
+    $Hd = @(Get-HdSshItems)
+    $script:Hosts = $Hd + $Local
     $script:Keys = @(Get-SshKeys $script:Hosts)
 
+    # a group per Helpdesk site (by name), then «Локальные»; favorites first inside each group
     $script:HostItems.Clear()
     $Favs = @($script:Settings.Favorites)
-    $Ordered = @($script:Hosts | Where-Object { $Favs -contains $_.Alias }) + @($script:Hosts | Where-Object { $Favs -notcontains $_.Alias })
-    foreach ($H in $Ordered) { $script:HostItems.Add((New-HostRow $H)) }
+    $Groups = @(@($Hd | ForEach-Object Group | Select-Object -Unique | Sort-Object) + @("Локальные"))
+    foreach ($G in $Groups) {
+        $In = @($script:Hosts | Where-Object { $_.Group -eq $G })
+        foreach ($H in @($In | Where-Object { $Favs -contains $_.Alias }) + @($In | Where-Object { $Favs -notcontains $_.Alias })) { $script:HostItems.Add((New-HostRow $H)) }
+    }
+    if ($script:HostView) {
+        $script:HostView.GroupDescriptions.Clear()
+        if ($Hd.Count) { $script:HostView.GroupDescriptions.Add([System.Windows.Data.PropertyGroupDescription]::new("Group")) }
+    }
     $script:KeyItems.Clear()
     foreach ($K in $script:Keys) { $script:KeyItems.Add((New-KeyRow $K)) }
 
@@ -129,6 +143,8 @@ function Get-HostsSub {
     if ($Ok -or $Fail) { $S += " · $Ok доступны · $Fail с ошибкой" }
     $Missing = @($script:HostItems | Where-Object { $_.KeyMissing }).Count
     if ($Missing) { $S += " · $Missing без файла ключа" }
+    $Hd = Get-HdSubText
+    if ($Hd) { $S += " · $Hd" }
     return $S
 }
 
@@ -186,7 +202,7 @@ function Update-HostDetails {
     $Ui.HdAvatar.FontFamily = New-Object System.Windows.Media.FontFamily $Row.AvatarFont
     $Ui.HdAvatar.Foreground = ConvertTo-Brush $Row.AvatarFg
     $Ui.HdAlias.Text = $H.Alias
-    $Ui.HdAddress.Text = $Row.Address + $(if ($H.ProxyJump) { "  через $($H.ProxyJump)" } else { "" })
+    $Ui.HdAddress.Text = $Row.Address + $(if ($H.ProxyJump) { "  через $($H.ProxyJump)" } else { "" }) + $(if ($H.Source -eq "helpdesk") { Get-HdHostNote $H.Hd } else { "" })
 
     $St = $script:Status[$H.Alias]
     if ($St) { Set-StatusPill $Ui.HdStatusPill $Ui.HdStatus $St.Kind $(if ($St.Kind -eq "ok") { "SSH работает · $($St.Text)" } elseif ($St.Kind -eq "fail") { "SSH: $($St.Text)" } else { "проверка…" }) }
@@ -199,15 +215,21 @@ function Update-HostDetails {
     $Ui.HdKeyPath.Foreground = $(if ($Mark -like "*нет*") { Get-Brush "Fail" } else { Get-Brush "Text" })
     $Ui.HdFp.Text = $(if ($K.Fingerprint) { $K.Fingerprint } else { "—" })
     $Ui.HdPub.Text = $(if ($K.PubText) { $K.PubText } else { "нет .pub файла" })
-    $Ui.HdCfg.Text = "$(Get-ConfigBlock $H.Alias)" -replace "`r?`n", "`r`n"
+    $Ui.HdCfg.Text = "$(Get-HostConfigBlock $H)" -replace "`r?`n", "`r`n"
 
     if ($St -and $St.Kind -eq "fail" -and $St.Detail) {
         $Ui.HdFailBox.Visibility = "Visible"
-        $Ui.HdFail.Text = $St.Detail
-        $Ui.HdFixKey.Visibility = $(if (Test-HostKeyChanged $St) { "Visible" } else { "Collapsed" })
+        $Ui.HdFail.Text = $(if ($H.Source -eq "helpdesk" -and $St.Text -like "ключ хоста*") { "Ключ хоста не совпадает с подтверждённым в Helpdesk или Helpdesk его ещё не подтвердил. Здесь он не принимается: проверь хост и ключ в Helpdesk, затем «Синхронизировать».`n`n$($St.Detail)" } else { $St.Detail })
+        $Ui.HdFixKey.Visibility = $(if ((Test-HostKeyChanged $St) -and $H.Source -ne "helpdesk") { "Visible" } else { "Collapsed" })
     } else {
         $Ui.HdFailBox.Visibility = "Collapsed"
     }
+}
+
+function Get-HostConfigBlock {
+    param($H)
+    if ($H.Source -eq "helpdesk") { return Get-ConfigBlock $H.Alias (Get-HdConfPath) }
+    return Get-ConfigBlock $H.Alias
 }
 
 function Test-HostKeyChanged {
@@ -230,6 +252,7 @@ function Toggle-Favorite {
 
 function Repair-HostKey {
     param($H)
+    if ($H.Source -eq "helpdesk") { Show-HdManaged "Ключ хоста $($H.Alias)"; return }
     $St = $script:Status[$H.Alias]
     $Old = @(Get-KnownHostFingerprints $H)
     $New = ""; $Extra = @()
@@ -248,6 +271,7 @@ function Repair-HostKey {
 
 function Show-EditHostDialog {
     param($H)
+    if ($H.Source -eq "helpdesk") { Show-HdManaged $H.Alias; return }
     if ($H.Shared) { Show-Toast "Host-строка с несколькими алиасами — правь config вручную" "warn"; return }
 
     $D = New-Dialog "Изменить · $($H.Alias)" @"
@@ -353,6 +377,7 @@ function Update-KeyDetails {
 function Get-SshFailReason {
     param([string]$Text)
     switch -Regex ($Text) {
+        'host key is known for' { return "ключ хоста неизвестен" }
         'Host key verification failed|REMOTE HOST IDENTIFICATION' { return "ключ хоста изменился" }
         'Permission denied'                    { return "нет доступа по ключу" }
         'timed out'                            { return "таймаут" }
@@ -367,7 +392,7 @@ function Get-SshFailReason {
 }
 
 $script:SshTestBody = {
-    param($Q, $Ctl, $Aliases)
+    param($Q, $Ctl, $Aliases, $Strict)
     $Queue = [System.Collections.Queue]::new()
     foreach ($A in $Aliases) { $Queue.Enqueue($A) }
     $Running = @{}
@@ -375,7 +400,9 @@ $script:SshTestBody = {
         while ($Running.Count -lt 12 -and $Queue.Count -gt 0) {
             $A = $Queue.Dequeue()
             $Psi = New-Object System.Diagnostics.ProcessStartInfo "ssh.exe"
-            $Psi.Arguments = "-o BatchMode=yes -o ConnectTimeout=7 -o StrictHostKeyChecking=accept-new `"$A`" `"echo SSH_TEST_OK`""
+            # Helpdesk hosts: their config says StrictHostKeyChecking yes — a command-line option would override it
+            $Hk = $(if (@($Strict) -contains $A) { "" } else { "-o StrictHostKeyChecking=accept-new " })
+            $Psi.Arguments = "-o BatchMode=yes -o ConnectTimeout=7 $Hk`"$A`" `"echo SSH_TEST_OK`""
             $Psi.RedirectStandardOutput = $true; $Psi.RedirectStandardError = $true
             $Psi.UseShellExecute = $false; $Psi.CreateNoWindow = $true
             $P = [System.Diagnostics.Process]::Start($Psi)
@@ -396,12 +423,17 @@ $script:SshTestBody = {
 
 function Start-SshTest {
     param([string[]]$Aliases)
+    # Helpdesk hosts left out of ssh config (no confirmed host key / no ro user) cannot be tried by alias
+    $Off = @($script:Hosts | Where-Object { $_.Source -eq "helpdesk" -and $_.Hd.Skip -and $Aliases -contains $_.Alias })
+    foreach ($H in $Off) { $script:Status[$H.Alias] = @{ Kind = "fail"; Text = $H.Hd.Skip; Detail = "Хоста нет в ssh config: $($H.Hd.Skip). Это решается в Helpdesk («Доступы → SSH-хосты»), затем «Синхронизировать»." }; Update-HostRow $H.Alias }
+    $Aliases = @($Aliases | Where-Object { @($Off | ForEach-Object Alias) -notcontains $_ })
     if (-not $Aliases) { return }
     foreach ($A in $Aliases) {
         $script:Status[$A] = @{ Kind = "wait"; Text = "…"; Detail = "" }
         Update-HostRow $A
     }
-    [void](Start-Worker -Name "ssh-$([guid]::NewGuid())" -Body $script:SshTestBody -ArgList @(, $Aliases) -OnMessage {
+    $Strict = @($script:Hosts | Where-Object { $_.Source -eq "helpdesk" } | ForEach-Object Alias)
+    [void](Start-Worker -Name "ssh-$([guid]::NewGuid())" -Body $script:SshTestBody -ArgList @(@(, $Aliases) + @(, $Strict)) -OnMessage {
         param($M)
         if ($M.Type -ne "ssh") { return }
         if ($M.Code -eq 0 -and $M.Out -match "SSH_TEST_OK") {
@@ -460,6 +492,7 @@ function Start-WebProbe {
 
 function Remove-HostBlock {
     param($H)
+    if ($H.Source -eq "helpdesk") { Show-HdManaged $H.Alias; return }
     if ($H.Shared) { Show-Toast "Host-строка с несколькими алиасами — правь config вручную" "warn"; return }
     $Block = Get-ConfigBlock $H.Alias
     if (-not $Block) { return }
@@ -514,7 +547,7 @@ function Show-GoodiesMenu {
 function Get-HostMenuItems {
     $H0 = Get-SelectedHost
     $IsFav = $H0 -and (@($script:Settings.Favorites) -contains $H0.Alias)
-    $KeyChanged = $H0 -and (Test-HostKeyChanged $script:Status[$H0.Alias])
+    $KeyChanged = $H0 -and $H0.Source -ne "helpdesk" -and (Test-HostKeyChanged $script:Status[$H0.Alias])
     $Items = @(
         (New-MenuItem "Подключиться" 0xE756 { $H = Get-SelectedHost; if ($H) { Connect-Host $H.Alias } } "Enter")
         (New-MenuItem "Проверить SSH" 0xE73E { Start-SshTest (Get-SelectedAliases) } "Ctrl+T")
@@ -586,6 +619,7 @@ function New-ContextMenu {
 
 function Show-NewServerDialog {
     param($Prefill, [switch]$NewHost)
+    if ($Prefill -and $Prefill.Source -eq "helpdesk") { Show-HdManaged "Ключи $($Prefill.Alias)"; return }
 
     $Title = if ($Prefill -and -not $NewHost) { "Ключ по паролю · $($Prefill.Alias)" } else { "Новый сервер" }
     $D = New-Dialog $Title @"
@@ -774,7 +808,7 @@ function Initialize-HostsPage {
         param($R)
         $Q = $Ui.HostSearch.Text.Trim()
         if (-not $Q) { return $true }
-        return ("$($R.Alias) $($R.Address) $($R.KeyName) $($R.Jump)" -like "*$Q*")
+        return ("$($R.Alias) $($R.Address) $($R.KeyName) $($R.Jump) $($R.Group)" -like "*$Q*")
     }
     $script:KeyView = [System.Windows.Data.CollectionViewSource]::GetDefaultView($script:KeyItems)
     $script:KeyView.Filter = [Predicate[object]]{
@@ -830,7 +864,7 @@ function Initialize-HostsPage {
     $Ui.HdPing.Add_Click({ $H = Get-SelectedHost; if ($H) { Start-PingFor $H.HostName } })
     $Ui.HdCopyKey.Add_Click({ $H = Get-SelectedHost; if ($H) { $K = Find-KeyForHost $H; Copy-Text $K.PubText "ключ $($K.Name)" } })
     $Ui.HdCopyPub2.Add_Click({ $H = Get-SelectedHost; if ($H) { $K = Find-KeyForHost $H; Copy-Text $K.PubText "ключ $($K.Name)" } })
-    $Ui.HdCopyCfg.Add_Click({ $H = Get-SelectedHost; if ($H) { Copy-Text (Get-ConfigBlock $H.Alias) "блок config" } })
+    $Ui.HdCopyCfg.Add_Click({ $H = Get-SelectedHost; if ($H) { Copy-Text (Get-HostConfigBlock $H) "блок config" } })
     $Ui.HdInstall.Add_Click({ $H = Get-SelectedHost; if ($H) { Copy-Text (Get-InstallCommand (Find-KeyForHost $H).PubText) "команда установки" } })
     $Ui.HdPassword.Add_Click({ $H = Get-SelectedHost; if ($H) { Show-NewServerDialog $H } })
     $Ui.HdGoodies.Add_Click({ param($S, $E) Show-GoodiesMenu $S })

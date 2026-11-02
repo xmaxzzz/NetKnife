@@ -80,12 +80,30 @@ NetKnife на вкладке «Wi-Fi обход» только **собирае�
 Кнопки «Монитор» и «Эфир» на той же вкладке — монитор подключения (точка, RSSI, канал, шлюз/интернет/DNS, события
 роуминга) и сканер Wi-Fi.
 
+## Хосты из Helpdesk
+
+Helpdesk — единый источник доступов к хостам объектов (контракт: helpdesk `docs/NETKNIFE_SYNC.md`). Настройки →
+«Helpdesk»: адрес (по умолчанию `https://help.butlerdc.ae`) и персональный токен (Helpdesk → профиль → «Мои
+устройства», тип netknife). Токен хранится в диспетчере учётных данных Windows (`NetKnife/helpdesk`), в файлы и
+журнал не попадает.
+
+- `GET /api/v1/access/ssh-hosts` при запуске, раз в 15 минут и по кнопке; `If-None-Match` → 304 без изменений.
+  Последний ответ — `%LOCALAPPDATA%\NetKnife\helpdesk-hosts.json`: без интернета список работает по копии.
+- «Хосты»: группа на каждый объект, хосты из `~/.ssh/config` — группа «Локальные». Хосты Helpdesk здесь не
+  правятся и не удаляются. Алиас, совпавший с ручным или повторённый, получает `.<объект>`.
+- `~/.ssh/config.d/butler-helpdesk.conf` + `.known_hosts`, `Include` первой строкой `~/.ssh/config` (с бэкапом):
+  `ssh <алиас>` из любого терминала. Ключ — `netknife_mt` (netknife-mikrotik), `IdentitiesOnly yes`,
+  `StrictHostKeyChecking yes`; ключ хоста — только подтверждённый в Helpdesk, несовпадение = ошибка, без принятия.
+  Пользователь — для чтения (butler-service); алиасов под butler-rw нет: изменения — только через NetKnife с
+  подтверждением и `/export` до изменения.
+- MikroTik из Helpdesk попадают в список роутеров (монитор роуминга); ручной роутер с тем же адресом скрывается.
+- Поля реестра проверяются (алиас, адрес, порт, пользователи, ключи хостов); хост с недопустимым полем пропускается.
 ## Тесты
 
 ```
 pwsh -c "Invoke-Pester -Path tests"
 ```
-Pester 5. `tests/Collector.Tests.ps1` — клиент протокола против сервера в памяти; `tests/App.Tests.ps1` — целостность
+Pester 5. `tests/Collector.Tests.ps1` — клиент протокола против сервера в памяти; `tests/Helpdesk.Tests.ps1` — синхронизация хостов (кэш, ssh config, роутеры); `tests/App.Tests.ps1` — целостность
 (удалённые модули, разбор скриптов, имена элементов `Main.xaml`); `tests/Portable.Tests.ps1` — нет жёстких путей установки;
 `tests/Install.Tests.ps1` и `tests/Update.Tests.ps1` — установщик и обновление из программы (сеть замокана). Работают и в pwsh на Linux (DPAPI — только Windows).
 

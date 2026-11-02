@@ -38,6 +38,7 @@ function Get-SshHosts {
                     $Item = [pscustomobject]@{
                         Alias = $Name; HostName = $Name; User = ""; Port = "22"
                         IdentityFile = ""; ProxyJump = ""; Shared = ($Names.Count -gt 1)
+                        Source = "local"; Group = "Локальные"
                     }
                     $Result.Add($Item)
                     $Current += $Item
@@ -133,9 +134,9 @@ function Get-SshKeys {
 }
 
 function Get-ConfigBlock {
-    param([string]$Alias)
-    if (-not (Test-Path $script:ConfigPath)) { return $null }
-    $Config = Get-Content $script:ConfigPath -Raw
+    param([string]$Alias, [string]$Path = $script:ConfigPath)
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    $Config = Get-Content -LiteralPath $Path -Raw
     $M = [regex]::Match($Config, "(?ms)^Host\s+$([regex]::Escape($Alias))\s*\r?\n.*?(?=^Host\s+|^Match\s+|\z)")
     if ($M.Success) { return $M.Value.TrimEnd() }
     return $null
@@ -201,6 +202,8 @@ function Start-Terminal {
 
 function Connect-Host {
     param([string]$Alias)
+    $H = @($script:Hosts | Where-Object { $_.Alias -eq $Alias }) | Select-Object -First 1
+    if ($H -and $H.Source -eq "helpdesk" -and $H.Hd.Skip) { Show-Toast "$Alias нет в ssh config: $($H.Hd.Skip) — это решается в Helpdesk" "warn"; return }
     Start-Terminal "ssh $(Quote-Arg $Alias)" $Alias
     Show-Toast "ssh $Alias" "info"
 }
@@ -277,9 +280,9 @@ function Get-KnownHostNames {
 }
 
 function Get-KnownHostFingerprints {
-    param($HostItem)
+    param($HostItem, [string]$File = "")
     $Out = foreach ($N in Get-KnownHostNames $HostItem) {
-        $R = & ssh-keygen.exe -l -F $N 2>&1
+        $R = $(if ($File) { & ssh-keygen.exe -l -F $N -f $File 2>&1 } else { & ssh-keygen.exe -l -F $N 2>&1 })
         foreach ($L in @($R)) { if ("$L" -match '^\S+\s+(\S+)\s+(SHA256:\S+)') { "$($Matches[1])  $($Matches[2])" } }
     }
     return @($Out | Select-Object -Unique)

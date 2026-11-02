@@ -558,7 +558,20 @@
                     <!-- HOSTS -->
                     <Grid x:Name="PageHosts">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="410"/></Grid.ColumnDefinitions>
-                        <ListView x:Name="HostList" Style="{StaticResource List}" ItemTemplate="{StaticResource HostRowT}" Padding="14,0,8,12" SelectionMode="Extended"/>
+                        <ListView x:Name="HostList" Style="{StaticResource List}" ItemTemplate="{StaticResource HostRowT}" Padding="14,0,8,12" SelectionMode="Extended" VirtualizingPanel.IsVirtualizingWhenGrouping="True">
+                            <ListView.GroupStyle>
+                                <GroupStyle>
+                                    <GroupStyle.HeaderTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Orientation="Horizontal" Margin="4,12,0,4">
+                                                <TextBlock Text="{Binding Name}" Style="{StaticResource Caption}"/>
+                                                <TextBlock Text="{Binding ItemCount}" Style="{StaticResource Caption}" Foreground="{StaticResource Faint}" Margin="8,0,0,0"/>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </GroupStyle.HeaderTemplate>
+                                </GroupStyle>
+                            </ListView.GroupStyle>
+                        </ListView>
                         <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="4,0,18,16">
                             <StackPanel x:Name="HostDetails">
                                 <Border Style="{StaticResource CardBox}" Padding="16">
@@ -992,6 +1005,31 @@
                                 </StackPanel>
                             </Border>
 
+                            <Border Style="{StaticResource CardBox}">
+                                <StackPanel>
+                                    <TextBlock Text="HELPDESK — ДОСТУПЫ К ОБЪЕКТАМ" Style="{StaticResource Caption}"/>
+                                    <TextBlock Text="Хосты объектов (роутеры, серверы, Proxmox, LM) заводятся в Helpdesk. NetKnife забирает их при запуске и раз в 15 минут, хранит копию для работы на объекте без интернета и пишет ~/.ssh/config.d/butler-helpdesk.conf — алиасы работают и в обычном терминале. Вход — ключом netknife-mikrotik этого ноутбука, ключ хоста — только подтверждённый в Helpdesk. Токен: Helpdesk → профиль → «Мои устройства», тип netknife." Foreground="{StaticResource Sub}" FontSize="12" Margin="0,2,0,8" TextWrapping="Wrap"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <StackPanel><TextBlock Text="АДРЕС" Style="{StaticResource Caption}"/><TextBox x:Name="SetHdUrl" Style="{StaticResource MonoField}" Tag="https://help.butlerdc.ae"/></StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="ТОКЕН" Style="{StaticResource Caption}"/>
+                                            <Border Background="{StaticResource Card}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="8" Height="36">
+                                                <PasswordBox x:Name="SetHdToken" Background="Transparent" BorderThickness="0" Foreground="{StaticResource Text}" CaretBrush="{StaticResource Text}" FontFamily="{StaticResource MonoFont}" FontSize="13" Padding="10,0" VerticalContentAlignment="Center" ToolTip="Вставь токен и нажми «Сохранить». Он хранится в диспетчере учётных данных Windows и в поле больше не показывается."/>
+                                            </Border>
+                                        </StackPanel>
+                                    </Grid>
+                                    <TextBlock x:Name="SetHdTokenState" Foreground="{StaticResource Faint}" FontSize="11.5" Margin="2,6,0,0"/>
+                                    <WrapPanel Margin="0,8,0,0">
+                                        <Button x:Name="SetHdSave" Style="{StaticResource AccentBtn}" Padding="10,6" Margin="0,0,6,6"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74E;" Style="{StaticResource Glyph}"/><TextBlock Text="Сохранить токен"/></StackPanel></Button>
+                                        <Button x:Name="SetHdCheck" Style="{StaticResource Btn}" Padding="10,6" Margin="0,0,6,6" ToolTip="Полный запрос без ETag: токен действует? сколько объектов и хостов"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE73E;" Style="{StaticResource Glyph}"/><TextBlock Text="Проверить"/></StackPanel></Button>
+                                        <Button x:Name="SetHdSync" Style="{StaticResource Btn}" Padding="10,6" Margin="0,0,6,6"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE895;" Style="{StaticResource Glyph}"/><TextBlock Text="Синхронизировать сейчас"/></StackPanel></Button>
+                                        <Button x:Name="SetHdOpen" Style="{StaticResource GhostBtn}" Padding="10,6" Margin="0,0,6,6"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE774;" Style="{StaticResource Glyph}"/><TextBlock Text="Открыть Helpdesk"/></StackPanel></Button>
+                                        <Button x:Name="SetHdForget" Style="{StaticResource GhostBtn}" Padding="10,6" Margin="0,0,6,6" Visibility="Collapsed"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74D;" Style="{StaticResource Glyph}"/><TextBlock Text="Отключить"/></StackPanel></Button>
+                                    </WrapPanel>
+                                    <TextBlock x:Name="SetHdStatus" Foreground="{StaticResource Sub}" FontSize="12" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </Border>
                             <Border Style="{StaticResource CardBox}">
                                 <StackPanel>
                                     <TextBlock Text="РОУТЕРЫ MIKROTIK" Style="{StaticResource Caption}"/>

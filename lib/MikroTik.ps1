@@ -13,7 +13,14 @@ $script:MtGroup = "butler-service"  # groups butler-service-ro (user) / butler-s
 $script:MtKeyOwner = "netknife-mikrotik"   # comment of NetKnife's public key = key-owner on the router
 $script:MtApPattern = '([0-9A-Fa-f]{2}-){5}[0-9A-Fa-f]{2}'   # Omada AP DHCP host-name contains its MAC (renamed APs: "Имя (MAC)")
 
-function Get-MtRouters { return @($script:Settings.Routers | Where-Object { $_ -and $_.Id }) }
+# routers added by hand (settings.Routers) — the only ones NetKnife saves
+function Get-MtLocalRouters { return @($script:Settings.Routers | Where-Object { $_ -and $_.Id }) }
+# + MikroTik hosts of Helpdesk; a hand-added router with the same address gives way to the Helpdesk one
+function Get-MtRouters {
+    $Hd = @(Get-HdRouters)
+    $Addr = @($Hd | ForEach-Object { "$($_.Host):$($_.Port)" })
+    return @(@($Hd) + @(Get-MtLocalRouters | Where-Object { $Addr -notcontains "$($_.Host):$($_.Port)" }))
+}
 
 # cached AP list of a router (from its last DHCP read); empty when never read
 function Get-MtCachedAps {
@@ -33,8 +40,10 @@ function Get-MtSshArgs {
     param($R, [switch]$Admin, [switch]$Rw, [int]$Timeout = 6)
     $Adm = ($Admin -or -not $R.Ready)
     $Key = $(if ($Adm) { Resolve-MtPath "$($R.AdminKey)" } else { $script:MtKey })
-    $User = $(if ($Adm) { "$($R.Admin)" } elseif ($Rw) { $script:MtRwUser } else { $script:MtUser })
-    return @("-i", $Key, "-p", "$($R.Port)", "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o", "ConnectTimeout=$Timeout", "-o", "StrictHostKeyChecking=accept-new", "-o", "ServerAliveInterval=10", "$User@$($R.Host)")
+    $User = $(if ($Adm) { "$($R.Admin)" } elseif ($Rw) { $(if ($R.RwUser) { "$($R.RwUser)" } else { $script:MtRwUser }) } elseif ($R.User) { "$($R.User)" } else { $script:MtUser })
+    # Helpdesk routers: only the host key confirmed in Helpdesk, a mismatch is an error (never accepted silently)
+    $Hk = $(if ($R.KnownHostsFile) { @("-o", "UserKnownHostsFile=$($R.KnownHostsFile)", "-o", "StrictHostKeyChecking=yes") } else { @("-o", "StrictHostKeyChecking=accept-new") })
+    return @(@("-i", $Key, "-p", "$($R.Port)", "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o", "ConnectTimeout=$Timeout") + $Hk + @("-o", "ServerAliveInterval=10", "$User@$($R.Host)"))
 }
 # one-shot command in a worker (UI stays responsive); OnResult gets @{ Code; Out; Err }
 $script:MtExecBody = {
@@ -331,7 +340,7 @@ function Refresh-MtList {
     $Sel = $(if ($Ui.SetMtList.SelectedItem) { $Ui.SetMtList.SelectedItem.Id } else { $null })
     $Items = @(Get-MtRouters | ForEach-Object {
         $Aps = @(Get-MtCachedAps $_.Id).Count
-        [pscustomobject]@{ Id = $_.Id; Label = "$($_.Name)   $($_.Host):$($_.Port)   ·   $(if ($_.Ready) { 'netknife ✓' } else { "через $($_.Admin) — не подготовлен" })$(if ($Aps) { "   ·   точек: $Aps" })" }
+        [pscustomobject]@{ Id = $_.Id; Label = "$($_.Name)   $($_.Host):$($_.Port)   ·   $(if ($_.Source -eq 'helpdesk') { 'Helpdesk' } elseif ($_.Ready) { 'butler-service ✓' } else { "через $($_.Admin) — не подготовлен" })$(if ($Aps) { "   ·   точек: $Aps" })" }
     })
     $Ui.SetMtList.ItemsSource = $Items
     $Ui.SetMtList.DisplayMemberPath = "Label"
@@ -454,12 +463,13 @@ function Show-MtConnectDialog {
     $C = $script:MtConn; $script:MtConn = $null
     if (-not $C.Done) { return }
     $New = $C.Router
-    $script:Settings.Routers = @(Get-MtRouters | Where-Object { $_.Id -ne $New.Id }) + @($New)
+    $script:Settings.Routers = @(Get-MtLocalRouters | Where-Object { $_.Id -ne $New.Id }) + @($New)
     Save-Settings
     Refresh-MtList
     Set-MtStatus "$($New.Name): $($C.Info) · чтение butler-service, запись butler-rw (только с подтверждением)" "ok"
     Show-Toast "$($New.Name) подключён"
     Start-MtApRefresh $New
+    Request-HdAddHost $New
 }
 function Show-MtApsDialog {
     param($R)
@@ -488,14 +498,15 @@ function Initialize-MtSettings {
         $script:Settings.MtExtraKeys = @($Ok); Save-Settings
         if ($Bad.Count) { Show-Toast "Пропущено строк: $($Bad.Count) — нужен формат «ssh-rsa AAAA… имя-системы»" "warn" } elseif ($Ok.Count) { Show-Toast "Ключей других систем: $($Ok.Count) — войдут в команды подключения" }
     })
-    $Ui.SetMtEdit.Add_Click({ $R = Get-MtSelected; if ($R) { Show-MtConnectDialog $R } })
-    $Ui.SetMtList.Add_MouseDoubleClick({ $R = Get-MtSelected; if ($R) { Show-MtConnectDialog $R } })
-    $Ui.SetMtPrep.Add_Click({ $R = Get-MtSelected; if ($R) { Show-MtConnectDialog $R } })
+    $Ui.SetMtEdit.Add_Click({ $R = Get-MtSelected; if ($R) { if ($R.Source -eq "helpdesk") { Show-HdManaged $R.Name } else { Show-MtConnectDialog $R } } })
+    $Ui.SetMtList.Add_MouseDoubleClick({ $R = Get-MtSelected; if ($R) { if ($R.Source -eq "helpdesk") { Show-HdManaged $R.Name } else { Show-MtConnectDialog $R } } })
+    $Ui.SetMtPrep.Add_Click({ $R = Get-MtSelected; if ($R) { if ($R.Source -eq "helpdesk") { Show-HdManaged $R.Name } else { Show-MtConnectDialog $R } } })
     $Ui.SetMtTest.Add_Click({ $R = Get-MtSelected; if ($R) { Set-MtStatus "$($R.Name): подключаюсь…" "wait"; Test-MtRouter $R } })
     $Ui.SetMtAps.Add_Click({ $R = Get-MtSelected; if ($R) { Show-MtApsDialog $R } })
     $Ui.SetMtDel.Add_Click({
         $R = Get-MtSelected; if (-not $R) { return }
+        if ($R.Source -eq "helpdesk") { Show-HdManaged $R.Name; return }
         if (-not (Show-Confirm "Убрать $($R.Name) из NetKnife?" "Удаляется только запись в NetKnife. Пользователи butler-service и butler-rw на роутере остаются (они общие с helpdesk)." "Убрать" -Danger)) { return }
-        $script:Settings.Routers = @(Get-MtRouters | Where-Object { $_.Id -ne $R.Id }); Save-Settings; Refresh-MtList
+        $script:Settings.Routers = @(Get-MtLocalRouters | Where-Object { $_.Id -ne $R.Id }); Save-Settings; Refresh-MtList
     })
 }

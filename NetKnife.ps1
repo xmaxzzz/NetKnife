@@ -29,6 +29,7 @@ function Write-AppLog {
 . (Join-Path $PSScriptRoot "lib\Update.ps1")
 . (Join-Path $PSScriptRoot "lib\MikroTik.ps1")
 . (Join-Path $PSScriptRoot "lib\Mndp.ps1")
+. (Join-Path $PSScriptRoot "lib\Helpdesk.ps1")
 . (Join-Path $PSScriptRoot "pages\Hosts.ps1")
 . (Join-Path $PSScriptRoot "pages\Tunnels.ps1")
 . (Join-Path $PSScriptRoot "pages\Vpn.ps1")
@@ -322,6 +323,7 @@ $Win.Add_ContentRendered({
         Start-NetStatus
         Start-WebProbe
         Start-AutoTunnels
+        try { Start-HdTimer } catch { Write-AppLog "helpdesk: $_" }
         try { Initialize-Tray; if ($script:Settings.HotKey) { Register-AppHotKey } } catch { Write-AppLog "tray: $_" }
         if ($script:Settings.AutoUpdateCheck) { try { Start-UpdateCheck } catch { Write-AppLog "update: $_" } }
         try { Show-UpdateResult } catch { Write-AppLog "update result: $_" }
