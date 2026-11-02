@@ -261,11 +261,36 @@ function Get-ScanHopLabel {
     return $Ip
 }
 
+# "116" alone = the whole 192.168.116.0/24 (several numbers — several networks). Only bare numbers 0–255 are
+# expanded; the expanded form goes back into the box, so history and chips keep the real range.
+function ConvertFrom-ScanShorthand {
+    param([string]$Text)
+    $Toks = @("$Text".Trim() -split '[,;\s]+' | Where-Object { $_ })
+    if (-not $Toks.Count) { return $Text }
+    $Out = foreach ($T in $Toks) { if ($T -match '^\d{1,3}$' -and [int]$T -le 255) { "192.168.$([int]$T).0/24" } else { $T } }
+    $New = @($Out) -join " "
+    if ($New -eq (@($Toks) -join " ")) { return $Text }
+    return $New
+}
+
+function Expand-ScanShorthand {
+    param($Box)
+    $T = $Box.Text.Trim()
+    $New = ConvertFrom-ScanShorthand $T
+    if ($New -ne $T) {
+        $Box.Text = $New
+        $Box.CaretIndex = $New.Length
+        Show-Toast "Сеть: $T → $New" "info"
+    }
+    return $Box.Text.Trim()
+}
+
 function Start-NetScan {
     param([string]$Range)
 
     if ($Range) { $Ui.ScanRange.Text = $Range }
     $Range = Repair-TargetText $Ui.ScanRange
+    $Range = Expand-ScanShorthand $Ui.ScanRange
     if (-not $Range) { Show-Toast "Укажи диапазон" "warn"; [void]$Ui.ScanRange.Focus(); return }
 
     $Parsed = Expand-IpRange $Range

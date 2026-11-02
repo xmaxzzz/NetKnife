@@ -1266,7 +1266,7 @@
                             <StackPanel>
                                 <Grid>
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                    <TextBox x:Name="ScanRange" Style="{StaticResource MonoField}" Height="40" FontSize="14.5" Tag="192.168.1.0/24 · 10.0.0.1-50 · 192.168.5.* · 192.168.5 · через запятую"/>
+                                    <TextBox x:Name="ScanRange" Style="{StaticResource MonoField}" Height="40" FontSize="14.5" Tag="192.168.1.0/24 · 10.0.0.1-50 · 192.168.5.* · 116 = 192.168.116.0/24 · через запятую"/>
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="10,0,0,0">
                                         <Button x:Name="ScanStart" Style="{StaticResource AccentBtn}" Padding="18,9">
                                             <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE768;" Style="{StaticResource Glyph}"/><TextBlock Text="Сканировать"/></StackPanel>
