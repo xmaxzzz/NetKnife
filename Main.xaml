@@ -1082,6 +1082,16 @@
                                             <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9D9;" Style="{StaticResource Glyph}"/><TextBlock Text="Журнал"/></StackPanel>
                                         </Button>
                                     </StackPanel>
+                                    <TextBlock Text="БЭКАП" Style="{StaticResource Caption}" Margin="2,16,0,0"/>
+                                    <TextBlock Text="Всё, что есть в NetKnife: настройки, роутеры, VPN-профили, обходы Wi-Fi, вся папка ~/.ssh (ключи, config, known_hosts), токены. Один файл, зашифрованный твоим паролем (AES-256). По умолчанию — в папку Яндекс Диска: клиент сам загрузит его в облако." Foreground="{StaticResource Sub}" FontSize="12" Margin="0,2,0,6" TextWrapping="Wrap"/>
+                                    <TextBlock x:Name="SetBkDir" FontFamily="{StaticResource MonoFont}" FontSize="12" Foreground="{StaticResource Sub}" TextWrapping="Wrap"/>
+                                    <WrapPanel Margin="0,8,0,0">
+                                        <Button x:Name="SetBkMake" Style="{StaticResource AccentBtn}" Padding="12,7" Margin="0,0,8,6"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE753;" Style="{StaticResource Glyph}"/><TextBlock Text="Сделать бэкап"/></StackPanel></Button>
+                                        <Button x:Name="SetBkRestore" Style="{StaticResource Btn}" Padding="12,7" Margin="0,0,8,6"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE777;" Style="{StaticResource Glyph}"/><TextBlock Text="Восстановить…"/></StackPanel></Button>
+                                        <Button x:Name="SetBkPick" Style="{StaticResource GhostBtn}" Padding="12,7" Margin="0,0,8,6"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8DA;" Style="{StaticResource Glyph}"/><TextBlock Text="Другая папка…"/></StackPanel></Button>
+                                        <Button x:Name="SetBkOpen" Style="{StaticResource GhostBtn}" Padding="12,7" Margin="0,0,8,6"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE838;" Style="{StaticResource Glyph}"/><TextBlock Text="Открыть"/></StackPanel></Button>
+                                    </WrapPanel>
+                                    <TextBlock x:Name="SetBkStatus" Foreground="{StaticResource Sub}" FontSize="12" TextWrapping="Wrap"/>
                                 </StackPanel>
                             </Border>
                         </StackPanel>

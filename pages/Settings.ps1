@@ -41,6 +41,7 @@ function Initialize-SettingsPage {
     $Ui.SetUpdAuto.Add_Click({ $script:Settings.AutoUpdateCheck = [bool]$Ui.SetUpdAuto.IsChecked; Save-Settings })
 
     Initialize-HdSettings
+    Initialize-BackupSettings
     Initialize-MtSettings
 
     $Ui.SetDataPath.Text = $script:DataDir

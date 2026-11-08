@@ -30,6 +30,7 @@ function Write-AppLog {
 . (Join-Path $PSScriptRoot "lib\MikroTik.ps1")
 . (Join-Path $PSScriptRoot "lib\Mndp.ps1")
 . (Join-Path $PSScriptRoot "lib\Helpdesk.ps1")
+. (Join-Path $PSScriptRoot "lib\Backup.ps1")
 . (Join-Path $PSScriptRoot "pages\Hosts.ps1")
 . (Join-Path $PSScriptRoot "pages\Tunnels.ps1")
 . (Join-Path $PSScriptRoot "pages\Vpn.ps1")
